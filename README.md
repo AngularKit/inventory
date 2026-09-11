@@ -45,18 +45,23 @@ npm run build
 
 ## Publier une version
 
-La release est pilotée par un tag `vX.Y.Z` :
+Tout est automatique via [release-please](https://github.com/googleapis/release-please) et les
+[Conventional Commits](https://www.conventionalcommits.org/fr/) :
 
-```bash
-npm version patch   # ou minor / major : met à jour package.json et crée le tag
-git push --follow-tags
-```
+1. Les commits sur `main` suivent la convention : `feat: …` (version mineure), `fix: …` (patch),
+   `feat!: …` ou footer `BREAKING CHANGE:` (majeure). Les `chore:`, `docs:`, `refactor:` n'ouvrent pas de release.
+2. release-please ouvre et maintient une PR « chore(main): release X.Y.Z » qui met à jour
+   `package.json` et `CHANGELOG.md`.
+3. Merger cette PR crée le tag `vX.Y.Z`, la GitHub Release, puis publie sur npm avec provenance
+   (`.github/workflows/release.yml`).
 
-Le workflow `.github/workflows/release.yml` vérifie que le tag correspond à `package.json`, lance les tests,
-publie sur npm avec provenance, puis crée la GitHub Release avec les notes générées automatiquement.
+Pour forcer un numéro précis, ajouter un footer `Release-As: 1.2.3` à un commit.
 
-Authentification npm, au choix :
+Mise en place, une seule fois :
 
-- **Trusted Publishing (recommandé, sans token)** : sur npmjs.com → package → *Settings* → *Trusted Publisher*,
-  déclarer le repo `AngularKit/inventory` et le workflow `release.yml`.
-- **Token** : secret `NPM_TOKEN` (automation token) dans les réglages du repo.
+- **GitHub** : Settings → Actions → General → cocher *Allow GitHub Actions to create and approve pull requests*.
+- **npm, au choix** :
+  - Secret `NPM_TOKEN` (automation token, bypass 2FA) dans le repo. Indispensable pour la toute première publication.
+  - Ensuite, **Trusted Publishing (recommandé, sans token)** : sur npmjs.com → package → *Settings* →
+    *Trusted Publisher* : repo `AngularKit/inventory`, workflow `release.yml`, environnement `npm`.
+    Le secret peut alors être supprimé.
