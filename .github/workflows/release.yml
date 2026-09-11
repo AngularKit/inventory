@@ -1,0 +1,84 @@
+name: Release
+
+# Déclenchée par un tag `vX.Y.Z` :
+#   npm version patch|minor|major   # met à jour package.json + crée le tag
+#   git push --follow-tags
+#
+# Publication npm via Trusted Publishing (OIDC, sans token) : déclarer ce workflow
+# comme « trusted publisher » sur npmjs.com (Package settings → Publishing access).
+# Repli : définir le secret NPM_TOKEN (automation token) dans le repo.
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Vérifications
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Le tag doit correspondre à la version du package.json
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::Tag v$TAG ≠ package.json $PKG" >&2
+            exit 1
+          fi
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  publish-npm:
+    name: Publier sur npm
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write # OIDC pour Trusted Publishing + provenance
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - name: npm ≥ 11.5 (requis pour Trusted Publishing)
+        run: npm install -g npm@latest && npm -v
+      - run: npm ci
+      - run: npm run build
+      - name: Publier (provenance activée via publishConfig)
+        run: npm publish
+        env:
+          # Vide si le secret n'existe pas → npm bascule sur OIDC.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  github-release:
+    name: GitHub Release
+    needs: publish-npm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm pack
+      - name: Créer la release avec notes auto-générées
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: '*.tgz'

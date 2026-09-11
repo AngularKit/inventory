@@ -1,0 +1,62 @@
+{
+  "name": "@angularkit/inventory",
+  "version": "0.1.0",
+  "description": "Inventaire des composants d'un projet Angular : sélecteurs, inputs/outputs, API publique, usages, doublons de concept et quasi-composants.",
+  "license": "MIT",
+  "author": "Gaetan Redin (ReCowd)",
+  "type": "module",
+  "bin": {
+    "angular-inventory": "./dist/cli.js"
+  },
+  "main": "./dist/inventory.js",
+  "types": "./dist/inventory.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/inventory.d.ts",
+      "default": "./dist/inventory.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist",
+    "dev": "tsx src/cli.ts",
+    "test": "tsx --test test/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepack": "npm run clean && npm run build"
+  },
+  "dependencies": {
+    "typescript": "^5.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AngularKit/inventory.git"
+  },
+  "homepage": "https://github.com/AngularKit/inventory#readme",
+  "bugs": {
+    "url": "https://github.com/AngularKit/inventory/issues"
+  },
+  "keywords": [
+    "angular",
+    "components",
+    "inventory",
+    "audit",
+    "design-system",
+    "nx",
+    "ai-agents"
+  ]
+}
