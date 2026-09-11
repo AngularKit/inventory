@@ -59,7 +59,13 @@ Pour forcer un numéro précis, ajouter un footer `Release-As: 1.2.3` à un comm
 
 Mise en place, une seule fois :
 
-- **GitHub** : Settings → Actions → General → cocher *Allow GitHub Actions to create and approve pull requests*.
+- **GitHub, au choix** :
+  - **Token dédié (recommandé)** : créer un PAT *fine-grained* limité à ce repo avec *Contents* et
+    *Pull requests* en lecture/écriture, et le poser en secret `RELEASE_PLEASE_TOKEN`. Avantage : la PR de
+    release déclenche la CI, ce qu'une PR ouverte avec `GITHUB_TOKEN` ne fait jamais.
+  - **Sans token** : activer *Allow GitHub Actions to create and approve pull requests* dans
+    Settings → Actions → General, d'abord au niveau de l'organisation (sinon la case est grisée dans le repo),
+    puis dans le repo.
 - **npm, au choix** :
   - Secret `NPM_TOKEN` (automation token, bypass 2FA) dans le repo. Indispensable pour la toute première publication.
   - Ensuite, **Trusted Publishing (recommandé, sans token)** : sur npmjs.com → package → *Settings* →

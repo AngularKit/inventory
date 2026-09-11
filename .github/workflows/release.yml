@@ -9,8 +9,11 @@ name: Release
 #      pas d'autre workflow) teste, build et publie sur npm avec provenance.
 #
 # Auth npm : Trusted Publishing (OIDC) une fois le paquet existant, sinon secret NPM_TOKEN.
-# Pré-requis GitHub : Settings → Actions → General → « Allow GitHub Actions to create
-# and approve pull requests » coché (sinon release-please ne peut pas ouvrir sa PR).
+# Pré-requis GitHub, au choix (cf. README « Publier une version ») :
+#   - secret RELEASE_PLEASE_TOKEN (PAT fine-grained : Contents + Pull requests en écriture),
+#     recommandé car une PR ouverte avec GITHUB_TOKEN ne déclenche pas la CI ;
+#   - ou « Allow GitHub Actions to create and approve pull requests » activé
+#     au niveau de l'organisation puis du repo.
 
 on:
   push:
@@ -33,6 +36,8 @@ jobs:
       - uses: googleapis/release-please-action@v4
         id: rp
         with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          target-branch: main
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
