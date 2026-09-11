@@ -5,6 +5,7 @@
   "license": "MIT",
   "author": "Gaetan Redin (ReCowd)",
   "type": "module",
+  "packageManager": "npm@10.9.7",
   "bin": {
     "angular-inventory": "./dist/cli.js"
   },
