@@ -183,6 +183,18 @@ test('CLI search emits reusable JSON and Markdown, with query options before the
   } finally { p.close(); }
 });
 
+test('CLI catalogue stays compact by default; --details adds one reuse sheet per component', () => {
+  const p = project({ 'card.ts': component('Card') });
+  try {
+    const run = (...extra: string[]) => spawnSync(process.execPath, ['--import','tsx',cli,p.root,...extra], {encoding:'utf8'});
+    const compact = run();
+    assert.equal(compact.status, 0, compact.stderr);
+    assert.match(compact.stdout, /\| Card \| `app-card` \|/);
+    assert.doesNotMatch(compact.stdout, /### Card/);
+    assert.match(run('--details').stdout, /## Réutiliser un composant[\s\S]*### Card/);
+  } finally { p.close(); }
+});
+
 test('ambiguous star exports do not invent a usable barrel import', () => {
   const p = project({
     'a.ts': component('Card'), 'b.ts': component('Card'),
@@ -269,7 +281,8 @@ test('standalone defaults depend on Angular major; NgModules identify declaratio
       assert.equal(inv.components.find((c) => c.className === 'Auto')!.standalone, expected);
       assert.equal(legacy.standalone, false);
       assert.deepEqual(legacy.ngModules, [{name:'InternalModule',file:'module.ts',exported:false}]);
-      assert.match(toMarkdown(inv), /déclaré mais non exporté/);
+      assert.match(toMarkdown(inv, { details: true }), /déclaré mais non exporté/);
+      assert.doesNotMatch(toMarkdown(inv), /## Réutiliser un composant/);
       fs.writeFileSync(path.join(p.root,'module.ts'), `import {Legacy} from './legacy'; @NgModule({declarations:[Legacy],exports:[Legacy]}) export class PublicModule {}`);
       assert.equal(scan(p.root).components.find((c) => c.className === 'Legacy')!.ngModules[0].exported, true);
     } finally { p.close(); }
@@ -296,15 +309,17 @@ export class Palette { value = input('', {alias:'teinte'}); confirmed = output()
   } finally { p.close(); }
 });
 
-test('strong name matches avoid incidental mentions; host accessibility labels are searchable', () => {
+test('strong name matches rank first and drop template mentions, not documented candidates; host accessibility labels are searchable', () => {
   const p = project({
     'card.ts': component('ProductCard'),
     'page.ts': `@Component({template:'<p>Product card</p>'}) export class Page {}`,
+    'teaser.ts': `/** Compact product card for listings. */ @Component({selector:'app-teaser'}) export class Teaser {}`,
     'picker.ts': `@Component({selector:'theme-picker',host:{'aria-label':'Couleur'}}) export class ThemePicker {}`,
   });
   try {
     const inv = scan(p.root);
-    assert.deepEqual(searchComponents(inv, 'product card').map((r) => r.component.className), ['ProductCard']);
+    assert.deepEqual(searchComponents(inv, 'product card').map((r) => r.component.className), ['ProductCard', 'Teaser']);
+    assert.ok(searchComponents(inv, 'product card')[1].reasons.some((r) => r.includes('Description')));
     assert.deepEqual(searchComponents(inv, 'choisir couleur').map((r) => r.component.className), ['ThemePicker']);
     assert.ok(searchComponents(inv, 'choisir couleur')[0].reasons.some((r) => r.includes('template')));
   } finally { p.close(); }

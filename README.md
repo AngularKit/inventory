@@ -2,35 +2,19 @@
 
 Avant de créer un composant Angular, trouve celui que ton projet possède déjà et vois comment le réutiliser.
 
-Pars d'un besoin, examine quelques composants candidats, puis vérifie leur import, leurs entrées et leurs usages existants. Un résultat peut être une réponse directe ou une piste à adapter : la recherche aide à décider, elle ne garantit pas l'adéquation fonctionnelle.
+Pars d'un besoin, examine quelques candidats, puis vérifie leur import, leurs entrées et leurs usages existants. La recherche aide à décider ; elle ne garantit pas que le composant convient.
 
 ```bash
 npx @angularkit/inventory .                      # rapport sur stdout
 npx @angularkit/inventory . --md COMPONENTS.md   # catalogue à committer / donner à l'agent
 npx @angularkit/inventory . --json components.json
 npx @angularkit/inventory . --search "card" --limit 3 # candidats avec explications
+npx @angularkit/inventory . --md COMPONENTS.md --details # + une fiche de réutilisation par composant
 ```
 
 ## À côté de Compodoc
 
-[Compodoc](https://github.com/compodoc/compodoc#features) documente largement un projet Angular : composants, services, directives, interfaces, routes, graphes et couverture documentaire. Sa documentation officielle décrit aussi une recherche, des exports JSON et du Markdown destiné aux LLM. Le fonctionnement local, la recherche et les formats pour agents sont donc des points communs.
-
-Inventory se spécialise dans la décision de réutilisation pendant une tâche de développement. Sa valeur tient aux informations réunies autour de chaque candidat :
-
-- **Le retrouver à partir du besoin** : une commande renvoie une sélection limitée, avec la raison lexicale de chaque correspondance.
-- **Préparer son intégration** : import résolu à partir des exports et alias du projet, entrées obligatoires déclarées, statut standalone et déclarations/exports directs de NgModules.
-- **Voir comment le projet l'utilise** : extraits de balises retrouvés dans les sources, avec fichier et ligne, et références de routes détectées.
-- **Repérer l'existant avant d'ajouter du code** : catalogue du contenu local, rapprochements de composants et motifs CSS répétés à examiner.
-
-| Besoin | Usage proposé |
-|---|---|
-| Publier une documentation navigable du projet et de son architecture | Compodoc correspond à cet objectif. |
-| Chercher quelques candidats et leurs informations de réutilisation depuis le terminal | Inventory propose ce parcours ciblé. |
-| Documenter le projet et aider un développeur ou un agent à réutiliser ses composants | Les deux outils peuvent être utilisés ensemble. |
-
-Cette spécialisation est notre positionnement, pas une preuve d'exclusivité de chaque fonctionnalité. Nous n'avons pas réalisé de comparaison expérimentale de pertinence, de rapidité ou de temps gagné face à Compodoc. Les essais d'Inventory comparent ses propres versions et un filtre littéral de référence.
-
-Sources consultées le 28 septembre 2026 : [fonctionnalités annoncées dans le dépôt officiel de Compodoc](https://github.com/compodoc/compodoc#features), [guide officiel](https://compodoc.app/guides/features.html). Les versions comparées devront être fixées pour un futur essai face à face.
+[Compodoc](https://github.com/compodoc/compodoc#features) documente tout le projet (composants, services, routes, graphes…) sous forme de site navigable. Inventory est plus étroit : il répond à « ce composant existe-t-il déjà, et comment je l'utilise ? » pendant une tâche, depuis le terminal ou via un agent. Les deux se combinent.
 
 ## Ce que ça sort
 
@@ -59,27 +43,13 @@ npx @angularkit/inventory . --search "carte" --limit 3
 npx @angularkit/inventory . --search "profile card" --json candidates.json --md candidates.md
 ```
 
-Chaque résultat indique pourquoi il correspond, comment l’importer si un export est confirmé, les entrées requises déclarées et jusqu’à trois exemples de balises existantes. Un nom ou sélecteur exact est favorisé. Lorsqu’un nom ou sélecteur couvre tous les termes, les candidats reposant sur des mentions secondaires sont écartés. Les noms pèsent davantage que les entrées/sorties, les descriptions et les textes. Les synonymes de recherche sont plus stricts que les groupes de concepts : une liste n’est pas un tableau, une icône n’est pas un avatar. Cette recherche reste lexicale, elle ne prouve pas que le composant remplit toutes les fonctions demandées.
+Chaque résultat indique pourquoi il correspond, comment l’importer si un export est confirmé, les entrées requises déclarées et jusqu’à trois exemples de balises existantes. Un nom ou sélecteur exact est favorisé, et les composants dont le nom couvre tous les termes passent en premier. Dans ce cas, les candidats trouvés seulement grâce au texte d'un template (une page qui *mentionne* « product card ») sont écartés ; ceux trouvés via leur description ou leurs entrées restent proposés. Les synonymes se limitent au vocabulaire UI générique (card/tile/carte, dialog/modal, table/tableau…) : une liste n’est pas un tableau, une icône n’est pas un avatar. La recherche reste lexicale.
 
-### Interpréter une proposition
+Un résultat vide signifie qu'aucune correspondance n'a été détectée, pas qu'aucun composant adapté n'existe : reformule avec un terme présent dans le projet ou consulte le catalogue.
 
-Évalue le résultat par rapport à la tâche et à ses contraintes :
+Sans `--search`, le JSON contient l'inventaire complet. Avec `--search`, il contient `query` et `results` (`component`, `score`, `reasons`) ; le score est un classement lexical, pas une probabilité.
 
-| Appréciation | Sens |
-|---|---|
-| Réponse directe | Le composant répond au besoin ; son contrat et son intégration restent à vérifier dans le contexte appelant. |
-| Piste utile à adapter | Le composant apporte une partie de la solution ou un exemple pertinent, avec une adaptation identifiable. |
-| Hors sujet | Le rapprochement lexical n'aide pas à accomplir la tâche demandée. |
-
-Ces appréciations sont une grille de lecture humaine. Le moteur ne les attribue pas automatiquement et elles ne sont pas des champs du JSON actuel.
-
-Une requête courte comme « vidéo » ou « table » est exploratoire. Une icône vidéo ou une table des matières peut être utile selon l'intention. Pour demander un lecteur avec commandes ou un tableau triable, précise ces contraintes lors de l'évaluation : ces mêmes résultats ne constituent alors pas une réponse directe. Une requête plus précise peut aussi ne produire aucun résultat, car le moteur ne comprend pas toutes les formulations métier.
-
-Un résultat vide indique l'absence de correspondance détectée, pas la preuve qu'aucun composant adapté n'existe. Consulte aussi le catalogue ou reformule avec un terme présent dans le projet.
-
-Sans `--search`, les fichiers contiennent l’inventaire complet. Avec `--search`, le JSON contient `query` et `results` ; chaque résultat comporte `component`, `score` et `reasons`. Le score est un classement lexical, pas une probabilité de pertinence.
-
-Les fiches ajoutent `description`, `templateText`, `standalone` (`true`, `false` ou `null`), `ngModules`, `inputDetails`, `imports`, `examples`, `routeReferences` et `usageStatus`. `stats.unused` reste disponible pour compatibilité et compte uniquement l’absence d’usage dans les templates ; utilise `stats.unconfirmed` pour les composants sans référence détectée dans les templates **ni** les routes.
+Chaque composant expose `description`, `templateText`, `standalone` (`true`, `false` ou `null`), `ngModules`, `inputDetails`, `imports`, `examples`, `routeReferences` et `usageStatus`. `stats.unused` garde son sens historique (aucun usage dans les templates) ; `stats.unconfirmed` compte les composants sans référence ni dans les templates ni dans les routes.
 
 ## Limites connues
 
@@ -96,13 +66,15 @@ Les fiches ajoutent `description`, `templateText`, `standalone` (`true`, `false`
 
 ## Utilisation avec un agent
 
-Génère `COMPONENTS.md` et référence-le depuis ton `CLAUDE.md` / `AGENTS.md` :
+Génère `COMPONENTS.md` (compact : une ligne par composant, avec son import) et référence-le depuis ton `CLAUDE.md` / `AGENTS.md` :
 
-> Avant de créer un composant UI, consulte `COMPONENTS.md`. Examine les candidats, leurs imports, leurs contraintes d'intégration et leurs usages existants. Explique si tu peux réutiliser directement un composant, adapter une piste utile ou si aucun candidat ne répond au besoin. Vérifie l'intégration avant de conclure.
+> Avant de créer un composant UI, consulte `COMPONENTS.md` ou lance `npx @angularkit/inventory . --search "<besoin>"`. Examine les candidats, leurs imports, leurs entrées requises et leurs usages existants, puis dis si tu réutilises, adaptes, ou si rien ne convient.
+
+`--details` ajoute une fiche complète par composant : pratique pour un petit projet, mais le fichier grossit vite (≈ 20 lignes par composant).
 
 ## Évaluer l'utilité
 
-Les [critères d'évaluation](docs/EVALUATION.md) distinguent une réponse directe, une piste utile et un résultat hors sujet. Ils séparent aussi la pertinence de recherche, la validité de l'intégration et le temps réellement gagné pendant une tâche.
+Les [critères d'évaluation](https://github.com/AngularKit/inventory/blob/main/docs/EVALUATION.md) distinguent une réponse directe, une piste utile et un résultat hors sujet. Ils séparent aussi la pertinence de recherche, la validité de l'intégration et le temps réellement gagné pendant une tâche.
 
 ## Développement
 

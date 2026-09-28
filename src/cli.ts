@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import { scan, toMarkdown, searchComponents, searchToMarkdown } from './inventory.js';
 
 const args = process.argv.slice(2);
-const usage = `Usage: angular-inventory [dir] [--search <termes>] [--limit <nombre>] [--json <file>] [--md <file>] [--quiet]
+const usage = `Usage: angular-inventory [dir] [--search <termes>] [--limit <nombre>] [--json <file>] [--md <file>] [--details] [--quiet]
 
 Catalogue des composants Angular et informations pour les réutiliser.
 
@@ -13,6 +13,7 @@ Catalogue des composants Angular et informations pour les réutiliser.
   --limit <n>      nombre maximal de candidats (défaut : 5, avec --search)
   --json <file>   écrit le catalogue ou les résultats de recherche en JSON
   --md <file>     écrit le rapport Markdown
+  --details       ajoute au rapport une fiche de réutilisation par composant (volumineux)
   --quiet         masque le rapport sur stdout
   --help, -h      affiche cette aide
 
@@ -24,10 +25,12 @@ if (args.includes('--help') || args.includes('-h')) { console.log(usage); proces
 try {
   let dir: string | undefined;
   let quiet = false;
+  let details = false;
   const opts = new Map<string, string>();
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === '--quiet') { quiet = true; continue; }
+    if (arg === '--details') { details = true; continue; }
     if (['--json', '--md', '--search', '--limit'].includes(arg)) {
       const value = args[++i];
       if (!value?.trim() || value.startsWith('--')) throw new Error(`Valeur manquante pour ${arg}.`);
@@ -42,7 +45,7 @@ try {
   const inv = scan(dir ?? '.');
   const query = opts.get('--search');
   const results = query ? searchComponents(inv, query, limit) : undefined;
-  const md = results ? searchToMarkdown(results, query!) : toMarkdown(inv);
+  const md = results ? searchToMarkdown(results, query!) : toMarkdown(inv, { details });
   const data = results ? { root: inv.root, scannedAt: inv.scannedAt, scope: inv.scope, query, results } : inv;
   for (const warning of inv.scope.warnings) console.error(`Attention : ${warning}`);
   const jsonOut = opts.get('--json');

@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import ts from 'typescript';
 import { search } from './search.js';
-import { matchesSelector, templateTags, templateSearchText } from './templates.js';
+import { matchesSelector, templateTags, templateSearchText, type TemplateTag } from './templates.js';
 import { collectFiles, type ScanScope } from './files.js';
 import { enrichReuse, type ImportSuggestion, type SourceReference, type UsageExample } from './reuse.js';
 
@@ -107,8 +107,58 @@ function signalKind(init: ts.Expression | undefined): 'input' | 'output' | undef
   return undefined;
 }
 
-function extractComponents(sourceFile: ts.SourceFile, root: string, defaultStandalone: boolean | null): Omit<ComponentInfo, 'public' | 'usages' | 'usedIn' | 'imports' | 'examples' | 'routeReferences' | 'usageStatus'>[] {
-  const result: Omit<ComponentInfo, 'public' | 'usages' | 'usedIn' | 'imports' | 'examples' | 'routeReferences' | 'usageStatus'>[] = [];
+function propertyNamed(obj: ts.ObjectLiteralExpression, name: string): ts.PropertyAssignment | undefined {
+  return obj.properties.find((p): p is ts.PropertyAssignment => ts.isPropertyAssignment(p) && p.name.getText() === name);
+}
+
+/** `@Input()`, `@Input('alias')`, `@Input({ alias, required })`. */
+function decoratorInput(member: ts.PropertyDeclaration | ts.SetAccessorDeclaration, decorator: ts.Decorator): InputInfo {
+  const name = member.name.getText();
+  const arg = ts.isCallExpression(decorator.expression) ? decorator.expression.arguments[0] : undefined;
+  const options = arg && ts.isObjectLiteralExpression(arg) ? arg : undefined;
+  const alias = arg && ts.isStringLiteral(arg) ? arg.text : options && stringProp(options, 'alias');
+  const required = options ? propertyNamed(options, 'required')?.initializer.kind === ts.SyntaxKind.TrueKeyword : false;
+  const type = ts.isPropertyDeclaration(member) ? member.type : member.parameters[0]?.type;
+  return { name, binding: alias || name, required, type: type?.getText() };
+}
+
+/** `input(initial, { alias })`, `input.required<T>({ alias })`, `model(...)`. */
+function signalInput(member: ts.PropertyDeclaration, call: ts.CallExpression): InputInfo {
+  const name = member.name.getText();
+  const required = ts.isPropertyAccessExpression(call.expression) && call.expression.name.text === 'required';
+  const arg = call.arguments[required ? 0 : 1];
+  const alias = arg && ts.isObjectLiteralExpression(arg) ? stringProp(arg, 'alias') : undefined;
+  return { name, binding: alias || name, required, type: call.typeArguments?.[0]?.getText() };
+}
+
+function jsDocDescription(node: ts.Node): string {
+  return ts.getJSDocCommentsAndTags(node).filter(ts.isJSDoc)
+    .map((doc) => typeof doc.comment === 'string' ? doc.comment : doc.comment?.map((part) => part.text).join('') ?? '')
+    .join(' ');
+}
+
+/** Static accessibility labels declared on the host element. */
+function hostLabels(meta: ts.ObjectLiteralExpression | undefined): string {
+  const host = meta && propertyNamed(meta, 'host');
+  if (!host || !ts.isObjectLiteralExpression(host.initializer)) return '';
+  const labels = host.initializer;
+  return ['aria-label', 'title', 'alt'].map((key) => stringProp(labels, key) ?? '').join(' ').trim();
+}
+
+/** null when metadata is computed or the flag is not a boolean literal. */
+function standaloneOf(meta: ts.ObjectLiteralExpression | undefined, defaultStandalone: boolean | null): boolean | null {
+  if (!meta || meta.properties.some(ts.isSpreadAssignment)) return null;
+  const prop = propertyNamed(meta, 'standalone');
+  if (!prop) return defaultStandalone;
+  if (prop.initializer.kind === ts.SyntaxKind.TrueKeyword) return true;
+  if (prop.initializer.kind === ts.SyntaxKind.FalseKeyword) return false;
+  return null;
+}
+
+type ExtractedComponent = Omit<ComponentInfo, 'public' | 'usages' | 'usedIn' | 'imports' | 'examples' | 'routeReferences' | 'usageStatus'>;
+
+function extractComponents(sourceFile: ts.SourceFile, root: string, defaultStandalone: boolean | null): ExtractedComponent[] {
+  const result: ExtractedComponent[] = [];
   const visit = (node: ts.Node) => {
     if (ts.isClassDeclaration(node) && node.name) {
       const dec = decoratorsOf(node).find((d) => decoratorName(d) === 'Component');
@@ -121,28 +171,19 @@ function extractComponents(sourceFile: ts.SourceFile, root: string, defaultStand
         const outputs: string[] = [];
         for (const m of node.members) {
           if (ts.isPropertyDeclaration(m) || ts.isSetAccessorDeclaration(m)) {
-            const names = decoratorsOf(m).map(decoratorName);
+            const decorators = decoratorsOf(m);
+            const inputDecorator = decorators.find((d) => decoratorName(d) === 'Input');
             const prop = m.name.getText();
-            if (names.includes('Input')) {
+            if (inputDecorator) {
               inputs.push(prop);
-              const decorator = decoratorsOf(m).find((d) => decoratorName(d) === 'Input')!;
-              const arg = ts.isCallExpression(decorator.expression) ? decorator.expression.arguments[0] : undefined;
-              const options = arg && ts.isObjectLiteralExpression(arg) ? arg : undefined;
-              inputDetails.push({ name: prop, binding: arg && ts.isStringLiteral(arg) ? arg.text : (options && stringProp(options, 'alias')) || prop,
-                required: !!options?.properties.some((p) => ts.isPropertyAssignment(p) && p.name.getText() === 'required' && p.initializer.kind === ts.SyntaxKind.TrueKeyword),
-                type: ts.isPropertyDeclaration(m) ? m.type?.getText() : m.parameters[0]?.type?.getText() });
+              inputDetails.push(decoratorInput(m, inputDecorator));
             }
-            else if (names.includes('Output')) outputs.push(prop);
+            else if (decorators.some((d) => decoratorName(d) === 'Output')) outputs.push(prop);
             else if (ts.isPropertyDeclaration(m)) {
               const k = signalKind(m.initializer);
               if (k === 'input' && m.initializer && ts.isCallExpression(m.initializer)) {
                 inputs.push(prop);
-                const call = m.initializer;
-                const required = ts.isPropertyAccessExpression(call.expression) && call.expression.name.text === 'required';
-                const arg = call.arguments[required ? 0 : 1];
-                const options = arg && ts.isObjectLiteralExpression(arg) ? arg : undefined;
-                inputDetails.push({ name: prop, binding: (options && stringProp(options, 'alias')) || prop,
-                  required, type: call.typeArguments?.[0]?.getText() });
+                inputDetails.push(signalInput(m, m.initializer));
               }
               if (k === 'output') outputs.push(prop);
             }
@@ -150,18 +191,9 @@ function extractComponents(sourceFile: ts.SourceFile, root: string, defaultStand
         }
         result.push({
           className: node.name.text,
-          description: ts.getJSDocCommentsAndTags(node).filter(ts.isJSDoc).map((doc) => typeof doc.comment === 'string' ? doc.comment : doc.comment?.map((part) => part.text).join('') ?? '').join(' '),
-          templateText: (() => {
-            const host = meta?.properties.find((p) => ts.isPropertyAssignment(p) && p.name.getText() === 'host');
-            if (!host || !ts.isPropertyAssignment(host) || !ts.isObjectLiteralExpression(host.initializer)) return '';
-            return ['aria-label', 'title', 'alt'].map((key) => stringProp(host.initializer as ts.ObjectLiteralExpression, key) ?? '').join(' ').trim();
-          })(),
-          standalone: (() => {
-            if (!meta || meta.properties.some(ts.isSpreadAssignment)) return null;
-            const prop = meta?.properties.find((p) => ts.isPropertyAssignment(p) && p.name.getText() === 'standalone');
-            if (!prop || !ts.isPropertyAssignment(prop)) return defaultStandalone;
-            return prop.initializer.kind === ts.SyntaxKind.TrueKeyword ? true : prop.initializer.kind === ts.SyntaxKind.FalseKeyword ? false : null;
-          })(),
+          description: jsDocDescription(node),
+          templateText: hostLabels(meta),
+          standalone: standaloneOf(meta, defaultStandalone),
           ngModules: [],
           selectors: selector ? selector.split(',').map((s) => s.trim()).filter(Boolean) : [],
           file: path.relative(root, sourceFile.fileName),
@@ -270,22 +302,42 @@ function classSignatures(template: string): string[] {
 
 // ---------- Main ----------
 
+/**
+ * Standalone default from the Angular major (standalone since 19). Prefer the installed
+ * version, accept an unambiguous major in package.json; unknown is safer than a guess.
+ */
+function angularDefaultStandalone(root: string): boolean | null {
+  for (const manifest of ['node_modules/@angular/core/package.json', 'package.json']) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(path.join(root, manifest), 'utf8'));
+      const version = manifest.startsWith('node_modules') ? pkg.version : pkg.dependencies?.['@angular/core'] ?? pkg.devDependencies?.['@angular/core'];
+      const major = typeof version === 'string' && version.match(/^[~^]?(\d+)\.\d+(?:\.\d+)?(?:-[\w.-]+)?$/);
+      if (major) return Number(major[1]) >= 19;
+    } catch { /* missing or unreadable manifest: try the next one */ }
+  }
+  return null;
+}
+
+/** 1-based line of a tag, in the .ts file for inline templates (when the offset is known). */
+function exampleLine(templateText: string, tag: TemplateTag, source?: ts.SourceFile, offset?: number): number | undefined {
+  if (!source) return templateText.slice(0, tag.start).split('\n').length;
+  if (offset === undefined) return undefined;
+  return source.text.slice(0, offset + tag.start).split('\n').length;
+}
+
+function usageStatusOf(c: ComponentInfo): ComponentInfo['usageStatus'] {
+  const routed = c.routeReferences.length > 0;
+  if (c.usages) return routed ? 'templates-and-routes' : 'templates';
+  return routed ? 'routes' : 'unconfirmed';
+}
+
 export function scan(rootInput: string): Inventory {
   const root = path.resolve(rootInput);
   const { files, scope } = collectFiles(root);
   const tsFiles = files.filter((f) => f.endsWith('.ts') && !f.endsWith('.spec.ts') && !f.endsWith('.d.ts') && !f.endsWith('.stories.ts'));
   const htmlFiles = files.filter((f) => f.endsWith('.html'));
 
-  let defaultStandalone: boolean | null = null;
-  // Prefer the installed version; accept an unambiguous major in package.json otherwise.
-  for (const manifest of ['node_modules/@angular/core/package.json', 'package.json']) {
-    try {
-      const pkg = JSON.parse(fs.readFileSync(path.join(root, manifest), 'utf8'));
-      const version = manifest.startsWith('node_modules') ? pkg.version : pkg.dependencies?.['@angular/core'] ?? pkg.devDependencies?.['@angular/core'];
-      const major = typeof version === 'string' && version.match(/^[~^]?(\d+)\.\d+(?:\.\d+)?(?:-[\w.-]+)?$/);
-      if (major) { defaultStandalone = Number(major[1]) >= 19; break; }
-    } catch { /* Unknown is safer than assuming a framework default. */ }
-  }
+  const defaultStandalone = angularDefaultStandalone(root);
   const components: ComponentInfo[] = [];
   const sources = new Map<string, ts.SourceFile>();
   // template text by owning file (relative path) — html files + inline templates
@@ -327,15 +379,12 @@ export function scan(rootInput: string): Inventory {
       if (!c.usedIn.includes(fileOnly)) c.usedIn.push(fileOnly);
       if (c.examples.length >= 3 || c.examples.some((e) => e.file === fileOnly)) continue;
       const tag = matches[0];
-      const source = sources.get(path.join(root, fileOnly));
-      const offset = source ? templateOffsets.get(tplFile) : 0;
-      if (offset !== undefined) c.examples.push({ file: fileOnly,
-        line: (source ? source.text.slice(0, offset + tag.start) : templates.get(tplFile)!.slice(0, tag.start)).split('\n').length,
-        snippet: tag.snippet });
+      const line = exampleLine(templates.get(tplFile)!, tag, sources.get(path.join(root, fileOnly)), templateOffsets.get(tplFile));
+      if (line !== undefined) c.examples.push({ file: fileOnly, line, snippet: tag.snippet });
     }
   }
 
-  for (const c of components) c.usageStatus = c.usages ? (c.routeReferences.length ? 'templates-and-routes' : 'templates') : (c.routeReferences.length ? 'routes' : 'unconfirmed');
+  for (const c of components) c.usageStatus = usageStatusOf(c);
 
   // Quasi-components
   const sigs = new Map<string, Set<string>>();
@@ -375,7 +424,12 @@ export function scan(rootInput: string): Inventory {
 
 // ---------- Markdown report ----------
 
-export function toMarkdown(inv: Inventory): string {
+export interface MarkdownOptions {
+  /** Append one reuse sheet per component (import, required inputs, examples). Large on big workspaces. */
+  details?: boolean;
+}
+
+export function toMarkdown(inv: Inventory, options: MarkdownOptions = {}): string {
   const L: string[] = [];
   const { stats } = inv;
   L.push(`# Inventaire des composants Angular`, '');
@@ -402,9 +456,10 @@ export function toMarkdown(inv: Inventory): string {
   }
 
   L.push(`## Catalogue`, '');
-  L.push(`| Composant | Sélecteur | Public | Usages | Inputs | Outputs | Fichier |`, `|---|---|---|---|---|---|---|`);
+  L.push(`| Composant | Sélecteur | Public | Usages | Inputs | Outputs | Import | Fichier |`, `|---|---|---|---|---|---|---|---|`);
   for (const c of inv.components) {
-    L.push(`| ${c.className} | \`${c.selectors.join(', ') || '—'}\` | ${c.public ? '✅' : '—'} | ${c.usages} | ${c.inputs.join(', ') || '—'} | ${c.outputs.join(', ') || '—'} | ${c.file} |`);
+    const from = c.imports[0]?.from;
+    L.push(`| ${c.className} | \`${c.selectors.join(', ') || '—'}\` | ${c.public ? '✅' : '—'} | ${c.usages} | ${c.inputs.join(', ') || '—'} | ${c.outputs.join(', ') || '—'} | ${from ? `\`${from}\`` : '—'} | ${c.file} |`);
   }
   L.push('');
 
@@ -415,8 +470,12 @@ export function toMarkdown(inv: Inventory): string {
     for (const c of unused) L.push(`- ${c.className} (\`${c.selectors[0] ?? 'sans sélecteur'}\`) — ${c.file}`);
     L.push('');
   }
-  L.push('## Réutiliser un composant', '');
-  for (const c of inv.components) L.push(...componentDetails(c));
+  if (options.details) {
+    L.push('## Réutiliser un composant', '');
+    for (const c of inv.components) L.push(...componentDetails(c));
+  } else {
+    L.push('Fiches de réutilisation (imports, entrées requises, exemples) : `--search <termes>` ou `--details`.', '');
+  }
   return L.join('\n');
 }
 
