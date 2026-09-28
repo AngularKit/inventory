@@ -207,3 +207,121 @@ test('a barrel value that shadows a star-exported component is not suggested', (
     assert.ok(c.imports.every((i) => i.kind === 'source'));
   } finally { p.close(); }
 });
+
+test('compound attribute selectors count real tags once and preserve exact examples', () => {
+  const p = project({
+    'button.ts': `@Component({selector:'button[kb-button], [kb-button][extra]', template:''}) export class Button {}`,
+    'page.html': `<!-- <button kb-button> -->
+<div title="kb-button <button kb-button>"></div>
+<button kb-button extra [disabled]="count > 0">ok</button>
+<button [kb-button]="active"></button>
+<button (kb-button)="onClick()"></button>
+<a kb-button></a>
+<script>const fake = '<button kb-button>';</script>`,
+  });
+  try {
+    const button = scan(p.root).components[0];
+    assert.equal(button.usages, 2);
+    assert.equal(button.examples[0].line, 3);
+    assert.equal(button.examples[0].snippet, '<button kb-button extra [disabled]="count > 0">');
+  } finally { p.close(); }
+});
+
+test('test utility directories are excluded with and without Git', () => {
+  for (const git of [false, true]) {
+    const p = project({ 'src/test-utils/render.ts': component('Test'), 'src/test-helpers/host.ts': component('Host'), 'src/real.ts': component('Real') }, git);
+    try { assert.deepEqual(scan(p.root).components.map((c) => c.className), ['Real']); }
+    finally { p.close(); }
+  }
+});
+
+test('named route loaders follow const aliases and functions but not cycles or shadowed parameters', () => {
+  const p = project({
+    'page.ts': component('Page'),
+    'routes.ts': `const loadPage = () => import('./page').then(m => m.Page);
+const alias = loadPage;
+function defaultLoader() { return import('./page').then(m => m.Page); }
+const cycleA = cycleB; const cycleB = cycleA;
+export const routes = [{path:'a',loadComponent:alias},{path:'b',loadComponent:defaultLoader},{path:'cycle',loadComponent:cycleA}];
+function fake(loadPage) { return [{path:'shadow',loadComponent:loadPage}]; }
+let mutable = loadPage;
+const nope = [{path:'mutable',loadComponent:mutable}];
+function destructured({loadPage}) { return [{path:'shadow2',loadComponent:loadPage}]; }
+function localShadow() { const {loadPage} = external; return [{path:'shadow3',loadComponent:loadPage}]; }`,
+  });
+  try {
+    const c = scan(p.root).components[0];
+    assert.equal(c.usageStatus, 'routes');
+    assert.deepEqual(c.routeReferences.map((r) => r.line), [5]); // same-line references deduplicated
+  } finally { p.close(); }
+});
+
+test('standalone defaults depend on Angular major; NgModules identify declaration and export boundaries', () => {
+  for (const [version, expected] of [['^18.2.0', false], ['^22.0.0', true], ['workspace:*', null]] as const) {
+    const p = project({
+      'package.json': JSON.stringify({dependencies:{'@angular/core': version}}),
+      'auto.ts': component('Auto'),
+      'legacy.ts': `@Component({standalone:false, selector:'legacy'}) export class Legacy {}`,
+      'module.ts': `import {Legacy as Local} from './legacy'; @NgModule({declarations:[Local],exports:[]}) export class InternalModule {}`,
+    });
+    try {
+      const inv = scan(p.root), legacy = inv.components.find((c) => c.className === 'Legacy')!;
+      assert.equal(inv.components.find((c) => c.className === 'Auto')!.standalone, expected);
+      assert.equal(legacy.standalone, false);
+      assert.deepEqual(legacy.ngModules, [{name:'InternalModule',file:'module.ts',exported:false}]);
+      assert.match(toMarkdown(inv), /déclaré mais non exporté/);
+      fs.writeFileSync(path.join(p.root,'module.ts'), `import {Legacy} from './legacy'; @NgModule({declarations:[Legacy],exports:[Legacy]}) export class PublicModule {}`);
+      assert.equal(scan(p.root).components.find((c) => c.className === 'Legacy')!.ngModules[0].exported, true);
+    } finally { p.close(); }
+  }
+});
+
+test('search indexes descriptions, aliased inputs, outputs and literal template labels with evidence', () => {
+  const p = project({
+    'picker.ts': `/** Choisir la couleur du profil. */
+@Component({selector:'palette-control',template:'<input placeholder="Chercher une nuance" [title]="secretBinding" /><img alt="{{ secretInterpolation }}"><span data-value=\\'title="secretAttribute"\\'></span><style>.secretCss {}</style><!-- secretComment -->'})
+export class Palette { value = input('', {alias:'teinte'}); confirmed = output(); }`,
+    'list.ts': `@Component({selector:'plain-list',template:'<ul><li>Un élément</li></ul>'}) export class List {}`,
+    'icon.ts': component('Icon'),
+  });
+  try {
+    const inv = scan(p.root);
+    for (const query of ['choisir couleur', 'chercher nuance', 'teinte', 'confirmed']) {
+      const found = searchComponents(inv, query);
+      assert.deepEqual(found.map((r) => r.component.className), ['Palette'], query);
+      assert.ok(found[0].reasons.some((r) => /Description|template|Entrée ou sortie/.test(r)));
+    }
+    for (const query of ['table', 'avatar', 'secretBinding', 'secretCss', 'secretComment', 'secretInterpolation', 'secretAttribute']) assert.deepEqual(searchComponents(inv, query), [], query);
+    assert.deepEqual(searchComponents(inv, 'les couleurs du profil').map((r) => r.component.className), ['Palette']);
+  } finally { p.close(); }
+});
+
+test('strong name matches avoid incidental mentions; host accessibility labels are searchable', () => {
+  const p = project({
+    'card.ts': component('ProductCard'),
+    'page.ts': `@Component({template:'<p>Product card</p>'}) export class Page {}`,
+    'picker.ts': `@Component({selector:'theme-picker',host:{'aria-label':'Couleur'}}) export class ThemePicker {}`,
+  });
+  try {
+    const inv = scan(p.root);
+    assert.deepEqual(searchComponents(inv, 'product card').map((r) => r.component.className), ['ProductCard']);
+    assert.deepEqual(searchComponents(inv, 'choisir couleur').map((r) => r.component.className), ['ThemePicker']);
+    assert.ok(searchComponents(inv, 'choisir couleur')[0].reasons.some((r) => r.includes('template')));
+  } finally { p.close(); }
+});
+
+test('computed metadata remains unknown and module declarations do not overwrite standalone metadata', () => {
+  const p = project({
+    'package.json': JSON.stringify({dependencies:{'@angular/core':'^22.0.0'}}),
+    'a.ts': '@Component(metadata) export class Dynamic {}',
+    'b.ts': '@Component({...metadata}) export class Spread {}',
+    'c.ts': '@Component({standalone:true}) export class Explicit {}',
+    'module.ts': "import {Explicit} from './c'; @NgModule({declarations:[Explicit]}) export class InvalidModule {}",
+  });
+  try {
+    const components = scan(p.root).components;
+    assert.equal(components.find((c) => c.className === 'Dynamic')!.standalone, null);
+    assert.equal(components.find((c) => c.className === 'Spread')!.standalone, null);
+    assert.equal(components.find((c) => c.className === 'Explicit')!.standalone, true);
+  } finally { p.close(); }
+});

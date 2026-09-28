@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 
 const IGNORED = new Set([
   'node_modules', 'dist', '.nx', '.angular', 'coverage', '.git', 'tmp',
-  'out-tsc', 'storybook-static', '.stryker-tmp', '__tests__', '__mocks__',
+  'out-tsc', 'storybook-static', '.stryker-tmp', '__tests__', '__mocks__', 'test-utils', 'test-helpers',
 ]);
 
 function included(file: string): boolean {

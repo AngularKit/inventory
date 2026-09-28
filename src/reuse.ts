@@ -173,14 +173,59 @@ export function enrichReuse(root: string, sources: Map<string, ts.SourceFile>, c
       component.routeReferences.push({ file: path.relative(root, file), line });
     }
   };
+  // Resolve loader identifiers in their lexical scope, including const aliases and named functions.
+  // Mutable bindings, parameters, cycles and arbitrary function calls remain unknown.
+  const binds = (name: ts.BindingName, target: string): boolean => ts.isIdentifier(name) ? name.text === target
+    : name.elements.some((element) => ts.isBindingElement(element) && binds(element.name, target));
+  const loader = (node: ts.Node, seen = new Set<ts.Node>()): ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration | undefined => {
+    if (seen.has(node)) return;
+    const next = new Set(seen).add(node);
+    if (ts.isArrowFunction(node) || ts.isFunctionExpression(node) || ts.isFunctionDeclaration(node)) return node;
+    if (ts.isParenthesizedExpression(node)) return loader(node.expression, next);
+    if (!ts.isIdentifier(node)) return;
+    for (let scope: ts.Node | undefined = node.parent; scope; scope = scope.parent) {
+      if (ts.isFunctionLike(scope) && scope.parameters.some((p) => binds(p.name, node.text))) return;
+      if (ts.isCatchClause(scope) && scope.variableDeclaration && binds(scope.variableDeclaration.name, node.text)) return;
+      if (!ts.isSourceFile(scope) && !ts.isBlock(scope)) continue;
+      for (const st of scope.statements) {
+        if (ts.isFunctionDeclaration(st) && st.name?.text === node.text) return loader(st, next);
+        if (!ts.isVariableStatement(st)) continue;
+        for (const declaration of st.declarationList.declarations) {
+          if (binds(declaration.name, node.text)) {
+            return ts.isIdentifier(declaration.name) && st.declarationList.flags & ts.NodeFlags.Const && declaration.initializer ? loader(declaration.initializer, next) : undefined;
+          }
+        }
+      }
+    }
+  };
   for (const [file, sf] of sources) {
+    for (const st of sf.statements) {
+      if (!ts.isClassDeclaration(st) || !st.name) continue;
+      const decorator = ts.getDecorators(st)?.find((d) => ts.isCallExpression(d.expression) && ts.isIdentifier(d.expression.expression) && d.expression.expression.text === 'NgModule');
+      const meta = decorator && ts.isCallExpression(decorator.expression) ? decorator.expression.arguments[0] : undefined;
+      if (!meta || !ts.isObjectLiteralExpression(meta)) continue;
+      const targets = (key: string) => {
+        const prop = meta.properties.find((p) => ts.isPropertyAssignment(p) && p.name.getText(sf) === key);
+        if (!prop || !ts.isPropertyAssignment(prop) || !ts.isArrayLiteralExpression(prop.initializer)) return [];
+        return prop.initializer.elements.flatMap((element) => {
+          const target = ts.isIdentifier(element) ? local(file, element.text, new Set()) : undefined;
+          return target ? [target] : [];
+        });
+      };
+      const declared = targets('declarations'), exported = targets('exports');
+      for (const c of components) {
+        const identity = { file: path.join(root, c.file), name: c.className };
+        if ([...declared, ...exported].some((t) => same(t, identity))) c.ngModules.push({ name: st.name.text, file: path.relative(root, file), exported: exported.some((t) => same(t, identity)) });
+      }
+    }
     const visit = (node: ts.Node) => {
       if (ts.isPropertyAssignment(node) && ts.isObjectLiteralExpression(node.parent)
         && node.parent.properties.some((p) => p.name && ['path', 'matcher'].includes(p.name.getText(sf).replace(/['"]/g, '')))) {
         const key = node.name.getText(sf).replace(/['"]/g, '');
         if (key === 'component' && ts.isIdentifier(node.initializer)) record(local(file, node.initializer.text, new Set()), file, node, sf);
-        if (key === 'loadComponent' && ts.isArrowFunction(node.initializer)) {
-          let body: ts.Node = node.initializer.body;
+        const load = key === 'loadComponent' ? loader(node.initializer) : undefined;
+        if (load?.body) {
+          let body: ts.Node = load.body;
           if (ts.isBlock(body)) {
             const returns = body.statements.filter(ts.isReturnStatement);
             if (returns.length === 1 && returns[0].expression) body = returns[0].expression;

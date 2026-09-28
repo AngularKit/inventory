@@ -12,7 +12,8 @@ npx @angularkit/inventory . --search "card" --limit 3 # candidats avec explicati
 ## Ce que ça sort
 
 - **Réutilisation** : imports vérifiés à partir des exports et des alias TypeScript du projet, entrées requises déclarées (types et noms de binding), extraits d’usages existants avec fichier et ligne. Les imports relatifs partent de la racine analysée : adapte-les au fichier appelant.
-- **Recherche** : nom, sélecteur, synonymes ou chemin ; chaque terme doit correspondre. Les candidats sont classés avec une explication, sans appel à un modèle ni réseau.
+- **Recherche** : noms, sélecteurs, entrées/sorties, descriptions JSDoc et textes littéraux des templates (dont labels accessibles). Normalise les accents et quelques équivalences françaises/anglaises ; chaque terme significatif doit correspondre. Les raisons indiquent la source de chaque correspondance. Les chemins se recherchent explicitement avec `/`. Aucun modèle ni réseau.
+- **Intégration** : statut standalone explicite ou déduit de la version Angular, NgModules déclarant/exportant directement le composant. Le statut reste inconnu si les métadonnées ne permettent pas de conclure.
 - **Catalogue** : chaque `@Component`, son sélecteur, ses inputs/outputs (décorateurs et API signal), s'il est exporté par un `index.ts`/`public-api.ts`, combien de fois et où il est utilisé.
 - **Concepts en doublon** : `ProfileCardComponent`, `StatTile`, `OrderPanel` et `UiCard` sont regroupés sous *card* (synonymes : card/tile/panel/box, modal/dialog/popup, …).
 - **Quasi-composants** : mêmes signatures de classes CSS (≥ 4 classes) copiées-collées dans plusieurs templates — le composant qui n'a jamais été extrait.
@@ -24,7 +25,7 @@ Analyse statique via l'API du compilateur TypeScript (pas besoin de compiler le 
 
 Dans un dépôt Git, analyse le contenu local actuel des fichiers suivis et des fichiers non ignorés, y compris les nouveaux fichiers non commités. Respecte les règles Git imbriquées ; un fichier déjà suivi reste analysé même s’il correspond à une règle d’exclusion Git.
 
-Ignore notamment `node_modules`, `dist`, `.nx`, `.angular`, `coverage`, `.stryker-tmp`, `__tests__`, `__mocks__`, `*.spec.ts`, `*.test.ts`, `*.stories.ts`, `*.d.ts`, `test-setup.ts` et `setup-tests.ts`. Ne suit pas les liens symboliques.
+Ignore notamment `node_modules`, `dist`, `.nx`, `.angular`, `coverage`, `.stryker-tmp`, `__tests__`, `__mocks__`, `test-utils`, `test-helpers`, `*.spec.ts`, `*.test.ts`, `*.stories.ts`, `*.d.ts`, `test-setup.ts` et `setup-tests.ts`. Ne suit pas les liens symboliques.
 
 Hors dépôt Git ou sans Git disponible, applique les exclusions intégrées et signale que les règles `.gitignore` ne sont pas appliquées.
 
@@ -35,19 +36,21 @@ npx @angularkit/inventory . --search "carte" --limit 3
 npx @angularkit/inventory . --search "profile card" --json candidates.json --md candidates.md
 ```
 
-Chaque résultat indique pourquoi il correspond, comment l’importer si un export est confirmé, les entrées requises déclarées et jusqu’à trois exemples de balises existantes. Un nom ou sélecteur exact passe avant une correspondance partielle, un synonyme ou un chemin.
+Chaque résultat indique pourquoi il correspond, comment l’importer si un export est confirmé, les entrées requises déclarées et jusqu’à trois exemples de balises existantes. Un nom ou sélecteur exact est favorisé. Lorsqu’un nom ou sélecteur couvre tous les termes, les candidats reposant sur des mentions secondaires sont écartés. Les noms pèsent davantage que les entrées/sorties, les descriptions et les textes. Les synonymes de recherche sont plus stricts que les groupes de concepts : une liste n’est pas un tableau, une icône n’est pas un avatar. Cette recherche reste lexicale, elle ne prouve pas que le composant remplit toutes les fonctions demandées.
 
 Sans `--search`, les fichiers contiennent l’inventaire complet. Avec `--search`, le JSON contient `query` et `results` ; chaque résultat comporte `component`, `score` et `reasons`. Le score est un classement lexical, pas une probabilité de pertinence.
 
-Les fiches ajoutent `inputDetails`, `imports`, `examples`, `routeReferences` et `usageStatus`. `stats.unused` reste disponible pour compatibilité et compte uniquement l’absence d’usage dans les templates ; utilise `stats.unconfirmed` pour les composants sans référence détectée dans les templates **ni** les routes.
+Les fiches ajoutent `description`, `templateText`, `standalone` (`true`, `false` ou `null`), `ngModules`, `inputDetails`, `imports`, `examples`, `routeReferences` et `usageStatus`. `stats.unused` reste disponible pour compatibilité et compte uniquement l’absence d’usage dans les templates ; utilise `stats.unconfirmed` pour les composants sans référence détectée dans les templates **ni** les routes.
 
 ## Limites connues
 
-- Les usages sont comptés par regex sur les templates : `<app-card` et `[appHighlight]`. Les sélecteurs de classe ou complexes sont ignorés.
+- Les usages sont comptés sur les balises des templates : éléments, attributs, et combinaisons comme `button[kb-button]` ou `[first][second]`. Les commentaires et le contenu des scripts/styles sont ignorés ; une balise n’est comptée qu’une fois par composant. Les sélecteurs de classe, valeurs d’attributs et pseudo-classes ne sont pas pris en charge. Ce lecteur statique ne remplace pas le parseur Angular.
 - Les groupes par concept sont lexicaux (nom + synonymes), pas sémantiques. Ils peuvent rapprocher des composants distincts. Les répétitions CSS sont des pistes à examiner, pas des recommandations automatiques d’extraction.
 - Les imports sont résolus dans les sources analysées et avec la configuration TypeScript à la racine. Les exports nommés, alias et réexports de valeurs sont suivis ; les exports de types sont exclus. Les imports relatifs doivent être adaptés au contexte d’utilisation et les contraintes de dépendances Nx restent à vérifier.
 - Les entrées requises prises en charge sont celles déclarées directement avec `@Input`, `input.required` ou `model.required`. Les entrées héritées, les alias des fonctions Angular importées et les métadonnées dynamiques ne sont pas résolus.
-- Les routes prises en charge sont les objets avec `path` ou `matcher`, une propriété `component` référant à une classe locale/importée, ou `loadComponent: () => import(...).then(m => m.Classe)` (et un import direct pour un export par défaut). Les autres formes et créations dynamiques restent non confirmées.
+- Les routes prises en charge sont les objets avec `path` ou `matcher`, une propriété `component` référant à une classe locale/importée, ou `loadComponent: () => import(...).then(m => m.Classe)` (et un import direct pour un export par défaut). Les fonctions nommées et alias `const` dans le même fichier sont suivis, avec protection contre les cycles et les paramètres qui masquent un nom. Les fonctions importées, appels arbitraires et bindings mutables ne sont pas résolus. Les autres formes et créations dynamiques restent non confirmées.
+- Le défaut standalone est déduit de la version Angular installée ou d’une version majeure explicite dans package.json (standalone par défaut depuis Angular 19). Les tableaux littéraux `declarations`/`exports` des NgModules sont analysés ; les réexports transitifs de modules et les métadonnées calculées ne sont pas suivis. Un import TypeScript valide ne garantit pas une intégration Angular valide.
+- Les descriptions et textes enrichissent la recherche, mais les synonymes sont limités. Les expressions Angular, traductions calculées et textes chargés à l’exécution ne sont pas évalués. Une correspondance lexicale n’est pas une garantie fonctionnelle.
 - Un extrait de balise montre le code existant ; ce n’est pas un exemple autonome avec toutes ses variables et dépendances.
 - Un composant `templateUrl` pointant hors du projet n'est pas résolu.
 - Outil fourni « as is ».

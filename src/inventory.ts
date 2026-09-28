@@ -1,6 +1,8 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import ts from 'typescript';
+import { search } from './search.js';
+import { matchesSelector, templateTags, templateSearchText } from './templates.js';
 import { collectFiles, type ScanScope } from './files.js';
 import { enrichReuse, type ImportSuggestion, type SourceReference, type UsageExample } from './reuse.js';
 
@@ -15,6 +17,10 @@ export interface InputInfo {
 
 export interface ComponentInfo {
   className: string;
+  description: string;
+  templateText: string;
+  standalone: boolean | null; // null when Angular version or metadata cannot be resolved
+  ngModules: { name: string; file: string; exported: boolean }[];
   selectors: string[];
   file: string; // relative to root
   templateFile?: string; // relative, if templateUrl
@@ -81,7 +87,7 @@ function decoratorArg(d: ts.Decorator): ts.ObjectLiteralExpression | undefined {
 
 function stringProp(obj: ts.ObjectLiteralExpression, name: string): string | undefined {
   for (const p of obj.properties) {
-    if (ts.isPropertyAssignment(p) && p.name.getText() === name) {
+    if (ts.isPropertyAssignment(p) && p.name.getText().replace(/^['"]|['"]$/g, '') === name) {
       const init = p.initializer;
       if (ts.isStringLiteral(init) || ts.isNoSubstitutionTemplateLiteral(init)) return init.text;
     }
@@ -101,7 +107,7 @@ function signalKind(init: ts.Expression | undefined): 'input' | 'output' | undef
   return undefined;
 }
 
-function extractComponents(sourceFile: ts.SourceFile, root: string): Omit<ComponentInfo, 'public' | 'usages' | 'usedIn' | 'imports' | 'examples' | 'routeReferences' | 'usageStatus'>[] {
+function extractComponents(sourceFile: ts.SourceFile, root: string, defaultStandalone: boolean | null): Omit<ComponentInfo, 'public' | 'usages' | 'usedIn' | 'imports' | 'examples' | 'routeReferences' | 'usageStatus'>[] {
   const result: Omit<ComponentInfo, 'public' | 'usages' | 'usedIn' | 'imports' | 'examples' | 'routeReferences' | 'usageStatus'>[] = [];
   const visit = (node: ts.Node) => {
     if (ts.isClassDeclaration(node) && node.name) {
@@ -144,6 +150,19 @@ function extractComponents(sourceFile: ts.SourceFile, root: string): Omit<Compon
         }
         result.push({
           className: node.name.text,
+          description: ts.getJSDocCommentsAndTags(node).filter(ts.isJSDoc).map((doc) => typeof doc.comment === 'string' ? doc.comment : doc.comment?.map((part) => part.text).join('') ?? '').join(' '),
+          templateText: (() => {
+            const host = meta?.properties.find((p) => ts.isPropertyAssignment(p) && p.name.getText() === 'host');
+            if (!host || !ts.isPropertyAssignment(host) || !ts.isObjectLiteralExpression(host.initializer)) return '';
+            return ['aria-label', 'title', 'alt'].map((key) => stringProp(host.initializer as ts.ObjectLiteralExpression, key) ?? '').join(' ').trim();
+          })(),
+          standalone: (() => {
+            if (!meta || meta.properties.some(ts.isSpreadAssignment)) return null;
+            const prop = meta?.properties.find((p) => ts.isPropertyAssignment(p) && p.name.getText() === 'standalone');
+            if (!prop || !ts.isPropertyAssignment(prop)) return defaultStandalone;
+            return prop.initializer.kind === ts.SyntaxKind.TrueKeyword ? true : prop.initializer.kind === ts.SyntaxKind.FalseKeyword ? false : null;
+          })(),
+          ngModules: [],
           selectors: selector ? selector.split(',').map((s) => s.trim()).filter(Boolean) : [],
           file: path.relative(root, sourceFile.fileName),
           templateFile: templateUrl ? path.relative(root, path.resolve(path.dirname(sourceFile.fileName), templateUrl)) : undefined,
@@ -179,33 +198,6 @@ function inlineTemplates(sourceFile: ts.SourceFile): Map<string, { text: string;
   };
   visit(sourceFile);
   return map;
-}
-
-// ---------- Usage counting ----------
-
-function escapeRe(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/** Regex matching a selector inside a template: `<app-card` or `appHighlight` as attribute. */
-function selectorRegex(selector: string): RegExp | undefined {
-  const attr = selector.match(/^\[([\w-]+)\]$/);
-  if (attr) return new RegExp(`[\\s(\\[]\\(?\\[?${escapeRe(attr[1])}\\]?[\\s=>\\]/)]`, 'g');
-  if (/^[\w-]+$/.test(selector)) return new RegExp(`<${escapeRe(selector)}[\\s>/]`, 'g');
-  return undefined; // class selectors, complex selectors: skipped
-}
-
-/** An exact opening-tag excerpt; quoted comparison operators must not end the tag. */
-function openingTag(template: string, matchIndex: number): { start: number; snippet: string } | undefined {
-  const start = template.lastIndexOf('<', matchIndex);
-  if (start < 0) return;
-  let quote: string | undefined;
-  for (let i = start + 1; i < template.length && i - start < 1000; i++) {
-    const char = template[i];
-    if (quote) { if (char === quote) quote = undefined; }
-    else if (char === '"' || char === "'") quote = char;
-    else if (char === '>') return { start, snippet: template.slice(start, i + 1) };
-  }
 }
 
 // ---------- Clustering by concept ----------
@@ -284,6 +276,16 @@ export function scan(rootInput: string): Inventory {
   const tsFiles = files.filter((f) => f.endsWith('.ts') && !f.endsWith('.spec.ts') && !f.endsWith('.d.ts') && !f.endsWith('.stories.ts'));
   const htmlFiles = files.filter((f) => f.endsWith('.html'));
 
+  let defaultStandalone: boolean | null = null;
+  // Prefer the installed version; accept an unambiguous major in package.json otherwise.
+  for (const manifest of ['node_modules/@angular/core/package.json', 'package.json']) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(path.join(root, manifest), 'utf8'));
+      const version = manifest.startsWith('node_modules') ? pkg.version : pkg.dependencies?.['@angular/core'] ?? pkg.devDependencies?.['@angular/core'];
+      const major = typeof version === 'string' && version.match(/^[~^]?(\d+)\.\d+(?:\.\d+)?(?:-[\w.-]+)?$/);
+      if (major) { defaultStandalone = Number(major[1]) >= 19; break; }
+    } catch { /* Unknown is safer than assuming a framework default. */ }
+  }
   const components: ComponentInfo[] = [];
   const sources = new Map<string, ts.SourceFile>();
   // template text by owning file (relative path) — html files + inline templates
@@ -297,7 +299,7 @@ export function scan(rootInput: string): Inventory {
     const sf = ts.createSourceFile(f, text, ts.ScriptTarget.Latest, true);
     sources.set(f, sf);
     if (!text.includes('@Component')) continue;
-    const found = extractComponents(sf, root);
+    const found = extractComponents(sf, root, defaultStandalone);
     const inline = inlineTemplates(sf);
     for (const c of found) {
       components.push({ ...c, public: false, usages: 0, usedIn: [], imports: [], examples: [], routeReferences: [], usageStatus: 'unconfirmed' });
@@ -312,36 +314,24 @@ export function scan(rootInput: string): Inventory {
 
   enrichReuse(root, sources, components, scope.warnings);
 
-  // Usages
+  const parsedTemplates = new Map([...templates].map(([file, text]) => [file, templateTags(text)]));
   for (const c of components) {
     const own = new Set([c.templateFile, c.file + '#' + c.className].filter(Boolean));
-    for (const sel of c.selectors) {
-      const re = selectorRegex(sel);
-      if (!re) continue;
-      for (const [tplFile, tpl] of templates) {
-        if (own.has(tplFile)) continue;
-        const n = tpl.match(re)?.length ?? 0;
-        if (n > 0) {
-          c.usages += n;
-          const fileOnly = tplFile.split('#')[0];
-          if (!c.usedIn.includes(fileOnly)) c.usedIn.push(fileOnly);
-          if (c.examples.length < 3 && !c.examples.some((e) => e.file === fileOnly)) {
-            const match = [...tpl.matchAll(selectorRegex(sel)!)][0];
-            if (match?.index !== undefined) {
-              const tag = openingTag(tpl, match.index);
-              if (tag) {
-                const { start, snippet } = tag;
-                const source = sources.get(path.join(root, fileOnly));
-                const offset = source ? templateOffsets.get(tplFile) : 0;
-                // For escaped inline literals, the file is still known, but don't invent a line.
-                if (offset !== undefined) c.examples.push({ file: fileOnly,
-                  line: (source ? source.text.slice(0, offset + start) : tpl.slice(0, start)).split('\n').length,
-                  snippet });
-              }
-            }
-          }
-        }
-      }
+    c.templateText = [c.templateText, ...[...own].map((file) => templateSearchText(templates.get(file!) ?? ''))].join(' ').trim();
+    for (const [tplFile, tags] of parsedTemplates) {
+      if (own.has(tplFile)) continue;
+      const matches = tags.filter((tag) => c.selectors.some((selector) => matchesSelector(tag, selector)));
+      if (!matches.length) continue;
+      c.usages += matches.length;
+      const fileOnly = tplFile.split('#')[0];
+      if (!c.usedIn.includes(fileOnly)) c.usedIn.push(fileOnly);
+      if (c.examples.length >= 3 || c.examples.some((e) => e.file === fileOnly)) continue;
+      const tag = matches[0];
+      const source = sources.get(path.join(root, fileOnly));
+      const offset = source ? templateOffsets.get(tplFile) : 0;
+      if (offset !== undefined) c.examples.push({ file: fileOnly,
+        line: (source ? source.text.slice(0, offset + tag.start) : templates.get(tplFile)!.slice(0, tag.start)).split('\n').length,
+        snippet: tag.snippet });
     }
   }
 
@@ -433,6 +423,11 @@ export function toMarkdown(inv: Inventory): string {
 /** Reuse details shared by the full catalogue and search results. */
 export function componentDetails(c: ComponentInfo): string[] {
   const lines = [`### ${c.className}`, '', `Source : \`${c.file}\``, ''];
+  if (c.description) lines.push(c.description, '');
+  lines.push(c.standalone === true ? 'Intégration : composant standalone, à ajouter aux imports du composant appelant.'
+    : c.standalone === false ? 'Intégration : composant non standalone ; utiliser un NgModule qui le déclare ou l’exporte.'
+    : 'Intégration standalone/NgModule non déterminée : vérifier les métadonnées et la version Angular.', '');
+  for (const module of c.ngModules) lines.push(`NgModule : \`${module.name}\` — \`${module.file}\` (${module.exported ? 'composant exporté' : 'déclaré mais non exporté ; indisponible hors de ce module'}).`, '');
   const suggestion = c.imports[0];
   if (suggestion) {
     lines.push(suggestion.kind === 'alias' ? 'Import via un alias résolu dans le projet :' : 'Import relatif à la racine analysée — adapter le chemin au fichier appelant :',
@@ -450,27 +445,11 @@ export interface SearchResult { component: ComponentInfo; score: number; reasons
 
 /** Deterministic lexical search, with evidence rather than a semantic-confidence claim. */
 export function searchComponents(inv: Inventory, query: string, limit = 5): SearchResult[] {
-  const words = [...new Set(query.trim().toLowerCase().split(/\s+/).filter(Boolean))];
-  if (!words.length) return [];
-  const results: SearchResult[] = [];
-  for (const component of inv.components) {
-    let score = 0;
-    const reasons: string[] = [];
-    for (const word of words) {
-      if (component.selectors.some((s) => s.toLowerCase() === word)) { score += 10; reasons.push(`Sélecteur exact : ${word}`); }
-      else if (component.className.toLowerCase() === word) { score += 10; reasons.push(`Nom exact : ${word}`); }
-      else if (component.className.toLowerCase().includes(word) || component.selectors.some((s) => s.toLowerCase().includes(word))) { score += 5; reasons.push(`Nom ou sélecteur contenant : ${word}`); }
-      else if (tokens(component).some((t) => conceptOf(t) === conceptOf(word))) { score += 2; reasons.push(`Synonyme lexical : ${word}`); }
-      else if (component.file.toLowerCase().includes(word)) { score += 1; reasons.push(`Chemin contenant : ${word}`); }
-      else { score = 0; break; }
-    }
-    if (score) results.push({ component, score, reasons });
-  }
-  return results.sort((a, b) => b.score - a.score || a.component.file.localeCompare(b.component.file) || a.component.className.localeCompare(b.component.className)).slice(0, Math.max(0, limit));
+  return search(inv, query, limit);
 }
 
 export function searchToMarkdown(results: SearchResult[], query: string): string {
-  const lines = [`# Recherche de composants : ${query}`, '', 'Correspondances lexicales ; chaque terme doit correspondre au nom, au sélecteur, à un synonyme ou au chemin.', ''];
+  const lines = [`# Recherche de composants : ${query}`, '', 'Correspondances lexicales expliquées : noms, entrées/sorties, descriptions et textes des templates. Les chemins se recherchent avec une barre oblique. Chaque terme significatif doit correspondre.', ''];
   if (!results.length) lines.push('Aucun candidat trouvé. Essayer un nom, un sélecteur ou un terme plus court.');
   for (const result of results) lines.push(...componentDetails(result.component), `Pourquoi : ${result.reasons.join(' ; ')}.`, '');
   return lines.join('\n');
