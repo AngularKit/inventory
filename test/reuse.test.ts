@@ -52,6 +52,97 @@ test('outside Git the report explicitly states the ignore limitation and skips s
   } finally { p.close(); }
 });
 
+test('required inputs preserve member names, binding aliases and declared types', () => {
+  const p = project({ 'card.ts': `@Component({selector:'app-card'}) export class Card {
+    title = input.required<string>({alias: 'heading'});
+    selected = model.required<boolean>();
+    optional = input('hello', {alias: 'caption'});
+    @Input({required: true, alias: 'item'}) value!: Product;
+    @Input('subtitle') text = '';
+    @Input({required: true}) set count(value: number) {}
+  }` });
+  try {
+    const c = scan(p.root).components[0];
+    assert.deepEqual(c.inputs, ['title', 'selected', 'optional', 'value', 'text', 'count']);
+    assert.deepEqual(c.inputDetails.filter((i) => i.required).map((i) => [i.binding, i.type]),
+      [['heading', 'string'], ['selected', 'boolean'], ['item', 'Product'], ['count', 'number']]);
+    assert.equal(c.inputDetails.find((i) => i.name === 'optional')?.binding, 'caption');
+    assert.equal(c.inputDetails.find((i) => i.name === 'text')?.binding, 'subtitle');
+  } finally { p.close(); }
+});
+
+test('only actually exported symbols are public; named re-exports and aliases preserve import names', () => {
+  const p = project({
+    'tsconfig.base.json': JSON.stringify({compilerOptions:{baseUrl:'.',paths:{'@demo/ui':['libs/ui/index.ts']}}}),
+    'tsconfig.json': JSON.stringify({extends:'./tsconfig.base.json'}),
+    'libs/ui/card.ts': component('Card') + '\n' + component('Hidden'),
+    'libs/ui/index.ts': "export { Card as PublicCard } from './card'; export type { Hidden } from './card';",
+  });
+  try {
+    const inv = scan(p.root);
+    const card = inv.components.find((c) => c.className === 'Card')!;
+    const hidden = inv.components.find((c) => c.className === 'Hidden')!;
+    assert.equal(card.public, true);
+    assert.equal(hidden.public, false);
+    assert.deepEqual(card.imports[0], {from:'@demo/ui',name:'PublicCard',kind:'alias',statement:'import { PublicCard as Card } from "@demo/ui";'});
+    assert.ok(!hidden.imports.some((i) => i.from === '@demo/ui'));
+  } finally { p.close(); }
+});
+
+test('wildcard aliases, local re-exports, default exports and export cycles', () => {
+  const p = project({
+    'tsconfig.json': JSON.stringify({compilerOptions:{baseUrl:'.',paths:{'@demo/*':['libs/*/index.ts']}}}),
+    'libs/card/card.ts': '@Component({selector:"app-card"}) export default class Card {}',
+    'libs/card/index.ts': "import Card from './card'; export { Card }; export * from './cycle';",
+    'libs/card/cycle.ts': "export * from './index';",
+  });
+  try {
+    const c = scan(p.root).components[0];
+    assert.equal(c.public, true);
+    assert.equal(c.imports[0].from, '@demo/card');
+    assert.match(c.imports.find((i) => i.kind === 'source')!.statement, /^import Card from/);
+  } finally { p.close(); }
+});
+
+test('eager and lazy route references resolve aliases without confusing same-name classes', () => {
+  const p = project({
+    'a.ts': component('Page'),
+    'b.ts': component('Page'),
+    'lazy.ts': component('Lazy'),
+    'default.ts': '@Component({}) export default class DefaultPage {}',
+    'routes.ts': `import { Page as Eager } from './a';
+export const routes = [
+{path:'a',component:Eager},
+{path:'lazy',loadComponent:()=>import('./lazy').then(m=>m.Lazy)},
+{path:'default',loadComponent:()=>import('./default')}
+];`,
+  });
+  try {
+    const inv = scan(p.root);
+    assert.equal(inv.components.find((c) => c.file === 'a.ts')?.usageStatus, 'routes');
+    assert.equal(inv.components.find((c) => c.file === 'b.ts')?.usageStatus, 'unconfirmed');
+    assert.equal(inv.components.find((c) => c.className === 'Lazy')?.routeReferences[0].line, 4);
+    assert.equal(inv.components.find((c) => c.className === 'DefaultPage')?.usageStatus, 'routes');
+    assert.equal(inv.stats.routed, 3);
+    assert.equal(inv.stats.unconfirmed, 1);
+  } finally { p.close(); }
+});
+
+test('usage excerpts point to real external and inline template lines', () => {
+  const p = project({
+    'card.ts': component('Card'),
+    'page.html': '\n<section>\n  <app-card [title]="title" [active]="count > 0">Text</app-card>\n</section>',
+    'page.ts': "@Component({template:`\n<div>\n<app-card />\n</div>`}) export class Page {}",
+  });
+  try {
+    const c = scan(p.root).components.find((c) => c.className === 'Card')!;
+    assert.equal(c.examples.length, 2);
+    assert.ok(c.examples.every((e) => e.line === 3));
+    assert.equal(c.examples[0].snippet, '<app-card [title]="title" [active]="count > 0">');
+    for (const e of c.examples) assert.ok(fs.readFileSync(path.join(p.root, e.file), 'utf8').split('\n')[e.line - 1].includes(e.snippet));
+  } finally { p.close(); }
+});
+
 const cli = fileURLToPath(new URL('../src/cli.ts', import.meta.url));
 test('CLI rejects missing option values and never scans an accidental positional value', () => {
   for (const args of [['--search'], ['--md'], ['--limit','0'], ['--limit','2'], ['--unknown']]) {
@@ -61,7 +152,44 @@ test('CLI rejects missing option values and never scans an accidental positional
   }
 });
 
-test('compound attribute selectors count real tags once', () => {
+test('CLI catalogue stays compact by default; --details adds one reuse sheet per component', () => {
+  const p = project({ 'card.ts': component('Card') });
+  try {
+    const run = (...extra: string[]) => spawnSync(process.execPath, ['--import','tsx',cli,p.root,...extra], {encoding:'utf8'});
+    const compact = run();
+    assert.equal(compact.status, 0, compact.stderr);
+    assert.match(compact.stdout, /\| Card \| `app-card` \|/);
+    assert.doesNotMatch(compact.stdout, /### Card/);
+    assert.match(run('--details').stdout, /## Réutiliser un composant[\s\S]*### Card/);
+  } finally { p.close(); }
+});
+
+test('ambiguous star exports do not invent a usable barrel import', () => {
+  const p = project({
+    'a.ts': component('Card'), 'b.ts': component('Card'),
+    'index.ts': "export * from './a'; export * from './b';",
+  });
+  try {
+    const inv = scan(p.root);
+    assert.ok(inv.components.every((c) => !c.public));
+    assert.ok(inv.components.every((c) => c.imports.every((i) => i.kind === 'source')));
+    fs.writeFileSync(path.join(p.root, 'index.ts'), "export * from './a'; export * from './b'; export {Card} from './b';");
+    const explicit = scan(p.root);
+    assert.equal(explicit.components.find((c) => c.file === 'a.ts')?.public, false);
+    assert.equal(explicit.components.find((c) => c.file === 'b.ts')?.public, true);
+  } finally { p.close(); }
+});
+
+test('a barrel value that shadows a star-exported component is not suggested', () => {
+  const p = project({ 'card.ts': component('Card'), 'index.ts': "export const Card = 'not a component'; export * from './card';" });
+  try {
+    const c = scan(p.root).components[0];
+    assert.equal(c.public, false);
+    assert.ok(c.imports.every((i) => i.kind === 'source'));
+  } finally { p.close(); }
+});
+
+test('compound attribute selectors count real tags once and preserve exact examples', () => {
   const p = project({
     'button.ts': `@Component({selector:'button[kb-button], [kb-button][extra]', template:''}) export class Button {}`,
     'page.html': `<!-- <button kb-button> -->
@@ -75,7 +203,8 @@ test('compound attribute selectors count real tags once', () => {
   try {
     const button = scan(p.root).components[0];
     assert.equal(button.usages, 2);
-    assert.deepEqual(button.usedIn, ['page.html']);
+    assert.equal(button.examples[0].line, 3);
+    assert.equal(button.examples[0].snippet, '<button kb-button extra [disabled]="count > 0">');
   } finally { p.close(); }
 });
 
@@ -87,3 +216,60 @@ test('test utility directories are excluded with and without Git', () => {
   }
 });
 
+test('named route loaders follow const aliases and functions but not cycles or shadowed parameters', () => {
+  const p = project({
+    'page.ts': component('Page'),
+    'routes.ts': `const loadPage = () => import('./page').then(m => m.Page);
+const alias = loadPage;
+function defaultLoader() { return import('./page').then(m => m.Page); }
+const cycleA = cycleB; const cycleB = cycleA;
+export const routes = [{path:'a',loadComponent:alias},{path:'b',loadComponent:defaultLoader},{path:'cycle',loadComponent:cycleA}];
+function fake(loadPage) { return [{path:'shadow',loadComponent:loadPage}]; }
+let mutable = loadPage;
+const nope = [{path:'mutable',loadComponent:mutable}];
+function destructured({loadPage}) { return [{path:'shadow2',loadComponent:loadPage}]; }
+function localShadow() { const {loadPage} = external; return [{path:'shadow3',loadComponent:loadPage}]; }`,
+  });
+  try {
+    const c = scan(p.root).components[0];
+    assert.equal(c.usageStatus, 'routes');
+    assert.deepEqual(c.routeReferences.map((r) => r.line), [5]); // same-line references deduplicated
+  } finally { p.close(); }
+});
+
+test('standalone defaults depend on Angular major; NgModules identify declaration and export boundaries', () => {
+  for (const [version, expected] of [['^18.2.0', false], ['^22.0.0', true], ['workspace:*', null]] as const) {
+    const p = project({
+      'package.json': JSON.stringify({dependencies:{'@angular/core': version}}),
+      'auto.ts': component('Auto'),
+      'legacy.ts': `@Component({standalone:false, selector:'legacy'}) export class Legacy {}`,
+      'module.ts': `import {Legacy as Local} from './legacy'; @NgModule({declarations:[Local],exports:[]}) export class InternalModule {}`,
+    });
+    try {
+      const inv = scan(p.root), legacy = inv.components.find((c) => c.className === 'Legacy')!;
+      assert.equal(inv.components.find((c) => c.className === 'Auto')!.standalone, expected);
+      assert.equal(legacy.standalone, false);
+      assert.deepEqual(legacy.ngModules, [{name:'InternalModule',file:'module.ts',exported:false}]);
+      assert.match(toMarkdown(inv, { details: true }), /déclaré mais non exporté/);
+      assert.doesNotMatch(toMarkdown(inv), /## Réutiliser un composant/);
+      fs.writeFileSync(path.join(p.root,'module.ts'), `import {Legacy} from './legacy'; @NgModule({declarations:[Legacy],exports:[Legacy]}) export class PublicModule {}`);
+      assert.equal(scan(p.root).components.find((c) => c.className === 'Legacy')!.ngModules[0].exported, true);
+    } finally { p.close(); }
+  }
+});
+
+test('computed metadata remains unknown and module declarations do not overwrite standalone metadata', () => {
+  const p = project({
+    'package.json': JSON.stringify({dependencies:{'@angular/core':'^22.0.0'}}),
+    'a.ts': '@Component(metadata) export class Dynamic {}',
+    'b.ts': '@Component({...metadata}) export class Spread {}',
+    'c.ts': '@Component({standalone:true}) export class Explicit {}',
+    'module.ts': "import {Explicit} from './c'; @NgModule({declarations:[Explicit]}) export class InvalidModule {}",
+  });
+  try {
+    const components = scan(p.root).components;
+    assert.equal(components.find((c) => c.className === 'Dynamic')!.standalone, null);
+    assert.equal(components.find((c) => c.className === 'Spread')!.standalone, null);
+    assert.equal(components.find((c) => c.className === 'Explicit')!.standalone, true);
+  } finally { p.close(); }
+});

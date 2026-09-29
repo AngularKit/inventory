@@ -1,19 +1,22 @@
 # @angularkit/inventory
 
-Répond à la question « est-ce que ce composant existe déjà dans ma codebase ? » sans grep ni Slack.
+Répond à la question « est-ce que ce composant existe déjà dans ma codebase ? » sans grep ni Slack, et indique comment le réutiliser.
 
 ```bash
 npx @angularkit/inventory .                      # rapport sur stdout
 npx @angularkit/inventory . --md COMPONENTS.md   # catalogue à committer / donner à l'agent
 npx @angularkit/inventory . --json components.json
+npx @angularkit/inventory . --md COMPONENTS.md --details # + une fiche de réutilisation par composant
 ```
 
 ## Ce que ça sort
 
+- **Réutilisation** : imports vérifiés à partir des exports et des alias TypeScript du projet, entrées requises déclarées (types et noms de binding), extraits d’usages existants avec fichier et ligne. Les imports relatifs partent de la racine analysée : adapte-les au fichier appelant.
+- **Intégration** : statut standalone explicite ou déduit de la version Angular, NgModules déclarant/exportant directement le composant. Le statut reste inconnu si les métadonnées ne permettent pas de conclure.
 - **Catalogue** : chaque `@Component`, son sélecteur, ses inputs/outputs (décorateurs et API signal), s'il est exporté par un `index.ts`/`public-api.ts`, combien de fois et où il est utilisé.
 - **Concepts en doublon** : `ProfileCardComponent`, `StatTile`, `OrderPanel` et `UiCard` sont regroupés sous *card* (synonymes : card/tile/panel/box, modal/dialog/popup, …).
 - **Quasi-composants** : mêmes signatures de classes CSS (≥ 4 classes) copiées-collées dans plusieurs templates — le composant qui n'a jamais été extrait.
-- **Jamais utilisés** : composants qu'aucun template ne référence (pages routées, ou code mort).
+- **Usages** : références dans les templates et dans les formes courantes de routes Angular. « Sans usage confirmé » ne signifie pas « code mort ».
 
 ## Comment ça marche
 
@@ -25,18 +28,31 @@ Ignore notamment `node_modules`, `dist`, `.nx`, `.angular`, `coverage`, `.stryke
 
 Hors dépôt Git ou sans Git disponible, applique les exclusions intégrées et signale que les règles `.gitignore` ne sont pas appliquées.
 
+## Réutiliser
+
+Le JSON contient l'inventaire complet.
+
+Chaque composant expose `standalone` (`true`, `false` ou `null`), `ngModules`, `inputDetails`, `imports`, `examples`, `routeReferences` et `usageStatus`. `stats.unused` garde son sens historique (aucun usage dans les templates) ; `stats.unconfirmed` compte les composants sans référence ni dans les templates ni dans les routes.
+
 ## Limites connues
 
 - Les usages sont comptés sur les balises des templates : éléments, attributs, et combinaisons comme `button[kb-button]` ou `[first][second]`. Les commentaires et le contenu des scripts/styles sont ignorés ; une balise n’est comptée qu’une fois par composant. Les sélecteurs de classe, valeurs d’attributs et pseudo-classes ne sont pas pris en charge. Ce lecteur statique ne remplace pas le parseur Angular.
 - Les groupes par concept sont lexicaux (nom + synonymes), pas sémantiques. Ils peuvent rapprocher des composants distincts. Les répétitions CSS sont des pistes à examiner, pas des recommandations automatiques d’extraction.
+- Les imports sont résolus dans les sources analysées et avec la configuration TypeScript à la racine. Les exports nommés, alias et réexports de valeurs sont suivis ; les exports de types sont exclus. Les imports relatifs doivent être adaptés au contexte d’utilisation et les contraintes de dépendances Nx restent à vérifier.
+- Les entrées requises prises en charge sont celles déclarées directement avec `@Input`, `input.required` ou `model.required`. Les entrées héritées, les alias des fonctions Angular importées et les métadonnées dynamiques ne sont pas résolus.
+- Les routes prises en charge sont les objets avec `path` ou `matcher`, une propriété `component` référant à une classe locale/importée, ou `loadComponent: () => import(...).then(m => m.Classe)` (et un import direct pour un export par défaut). Les fonctions nommées et alias `const` dans le même fichier sont suivis, avec protection contre les cycles et les paramètres qui masquent un nom. Les fonctions importées, appels arbitraires et bindings mutables ne sont pas résolus. Les autres formes et créations dynamiques restent non confirmées.
+- Le défaut standalone est déduit de la version Angular installée ou d’une version majeure explicite dans package.json (standalone par défaut depuis Angular 19). Les tableaux littéraux `declarations`/`exports` des NgModules sont analysés ; les réexports transitifs de modules et les métadonnées calculées ne sont pas suivis. Un import TypeScript valide ne garantit pas une intégration Angular valide.
+- Un extrait de balise montre le code existant ; ce n’est pas un exemple autonome avec toutes ses variables et dépendances.
 - Un composant `templateUrl` pointant hors du projet n'est pas résolu.
 - Outil fourni « as is ».
 
 ## Utilisation avec un agent
 
-Génère `COMPONENTS.md` et référence-le depuis ton `CLAUDE.md` / `AGENTS.md` :
+Génère `COMPONENTS.md` (compact : une ligne par composant, avec son import) et référence-le depuis ton `CLAUDE.md` / `AGENTS.md` :
 
 > Avant de créer un composant UI, lis `COMPONENTS.md` et réutilise l'existant.
+
+`--details` ajoute une fiche complète par composant : pratique pour un petit projet, mais le fichier grossit vite (≈ 20 lignes par composant).
 
 ## Développement
 
