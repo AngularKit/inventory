@@ -57,8 +57,13 @@ function bestEvidence(fields: Field[], word: string): Evidence | undefined {
 
 interface Scored extends SearchResult { nameCovers: boolean; incidental: boolean }
 
+// Equal lexical evidence: prefer what the project actually reuses (template or route
+// references), then its public API, over an alphabetical path that favours demos and docs.
+const reuse = (c: ComponentInfo) => c.usages + c.routeReferences.length;
 const rank = (a: Scored, b: Scored) => Number(b.nameCovers) - Number(a.nameCovers)
   || b.score - a.score
+  || reuse(b.component) - reuse(a.component)
+  || Number(b.component.public) - Number(a.component.public)
   || a.component.file.localeCompare(b.component.file)
   || a.component.className.localeCompare(b.component.className);
 

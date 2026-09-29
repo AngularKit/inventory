@@ -160,6 +160,17 @@ test('search explains exact and synonym matches, filters all terms, and respects
 });
 
 const cli = fileURLToPath(new URL('../src/cli.ts', import.meta.url));
+test('equal lexical evidence ranks components the project reuses before demos sorted first by path', () => {
+  const p = project({
+    'a-docs/button-demo.ts': `@Component({selector:'button-demo'}) export class ButtonDemo {}`,
+    'lib/button.ts': `@Component({selector:'button[lib-button]'}) export class LibButton {}`,
+    'app/page.ts': `@Component({selector:'app-page',template:'<button lib-button>Ok</button>'}) export class Page {}`,
+  });
+  try {
+    assert.deepEqual(searchComponents(scan(p.root), 'button').map((r) => r.component.className), ['LibButton', 'ButtonDemo']);
+  } finally { p.close(); }
+});
+
 test('CLI rejects missing option values and never scans an accidental positional value', () => {
   for (const args of [['--search'], ['--md'], ['--limit','0'], ['--limit','2'], ['--unknown']]) {
     const result = spawnSync(process.execPath, ['--import', 'tsx', cli, ...args], {encoding:'utf8'});

@@ -43,3 +43,19 @@ Ces cas ont guidé le développement : leurs gains mesurent une progression sur 
 Utiliser les mêmes instantanés de projets, fixer les versions et configurations des outils, puis réaliser les mêmes tâches avec les parcours réellement proposés par chacun. Pour les mesures de temps, distinguer la préparation de la documentation de la recherche et de la réutilisation ; alterner l'ordre des outils pour limiter l'effet d'apprentissage.
 
 Évaluer les résultats avec les critères ci-dessus et noter les échecs d'installation, d'analyse et d'intégration. Une comparaison à un filtre littéral sur les noms ne remplace pas cet essai avec Compodoc. Aucun résultat de ce type n'est encore revendiqué.
+
+## Jeu indépendant sur angular/components
+
+`docs/eval/angular-components.json` contient 44 besoins présents et 8 absents. Les attentes ont été fixées avant toute exécution, sur angular/components au commit `216866e` (28 septembre 2026). Pour le rejouer : `npm run build && node docs/eval/run.mjs <chemin vers angular/components>`.
+
+| Version | Attendu parmi les 3 premiers | Attendu en premier | Absents reconnus |
+|---|---|---|---|
+| PR #4 | 8/44 | 3/44 | 7/8 |
+| Corrections de revue (synonymes, filtre) | 8/44 | 3/44 | 7/8 |
+| + départage par usage réel | 38/44 | 32/44 | 7/8 |
+
+- Les corrections de revue ne changent pas le score : seules 2 requêtes sur 52 changent de résultats, avec un candidat ajouté en troisième position.
+- Les échecs de #4 venaient du départage des ex-aequo par chemin alphabétique : les démos `docs/…Scene` passaient devant les composants de la bibliothèque. Le départage favorise désormais les composants réellement utilisés, puis l'API publique.
+- Ce jeu a motivé le départage : pour ce changement précis, il n'est plus indépendant.
+- L'annotation « carousel absent » est fausse : le site de documentation contient un composant `Carousel`. Le score la garde telle quelle, puisque les attentes étaient figées.
+- Échecs restants : « barre de progression » (pas d'équivalence barre/bar), « boîte de dialogue », « dialog », « snackbar », « toast » et « tooltip ». Ces composants sont créés dynamiquement : ils n'ont aucun usage dans les templates et ne sont donc pas favorisés.
