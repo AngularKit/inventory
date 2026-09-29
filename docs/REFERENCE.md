@@ -26,6 +26,12 @@ Une erreur Git dans un dépôt existant (configuration invalide, accès refusé,
 
 ## Retrouver et réutiliser
 
+La sortie terminal est compacte par défaut, y compris lorsqu’elle est redirigée : résumé pour un scan, fiches courtes pour une recherche. `--details` affiche le rapport Markdown complet et ses fiches de réutilisation sur stdout. `--help` et `-h` affichent l’aide et des exemples sans lancer de scan.
+
+`--md fichier.md` conserve le catalogue complet (une ligne par composant), complété par les fiches si `--details` est présent. Pour une recherche, l’export Markdown contient toujours les fiches complètes et les extraits d’usages. Le JSON et les fonctions de rendu Markdown de l’API restent inchangés. `--quiet` masque stdout, pas les avertissements ni les confirmations d’écriture sur stderr.
+
+Pour les scripts qui enregistraient stdout comme rapport, remplacer la redirection par `--md fichier.md --quiet`, ou ajouter `--details` pour conserver un rapport détaillé sur stdout.
+
 ```bash
 npx @angularkit/inventory . --search "carte" --limit 3
 npx @angularkit/inventory . --search "profile card" --json candidates.json --md candidates.md
@@ -53,4 +59,3 @@ Chaque composant expose `description`, `templateText`, `standalone` (`true`, `fa
 - Un extrait de balise montre le code existant ; ce n’est pas un exemple autonome avec toutes ses variables et dépendances.
 - Un composant `templateUrl` pointant hors du projet n'est pas résolu.
 - Outil fourni « as is ».
-

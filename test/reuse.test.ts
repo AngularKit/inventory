@@ -176,6 +176,7 @@ test('CLI rejects missing option values and never scans an accidental positional
     const result = spawnSync(process.execPath, ['--import', 'tsx', cli, ...args], {encoding:'utf8'});
     assert.equal(result.status, 1, JSON.stringify(args));
     assert.match(result.stderr, /Erreur/);
+    assert.match(result.stderr, /angular-inventory --help/);
   }
 });
 
@@ -194,15 +195,97 @@ test('CLI search emits reusable JSON and Markdown, with query options before the
   } finally { p.close(); }
 });
 
-test('CLI catalogue stays compact by default; --details adds one reuse sheet per component', () => {
+test('CLI scan is a short summary; exports keep the catalogue and --details restores full stdout', () => {
   const p = project({ 'card.ts': component('Card') });
   try {
     const run = (...extra: string[]) => spawnSync(process.execPath, ['--import','tsx',cli,p.root,...extra], {encoding:'utf8'});
     const compact = run();
     assert.equal(compact.status, 0, compact.stderr);
-    assert.match(compact.stdout, /\| Card \| `app-card` \|/);
-    assert.doesNotMatch(compact.stdout, /### Card/);
+    assert.match(compact.stdout, /1 composant détecté/);
+    assert.match(compact.stdout, /--search "carte"/);
+    assert.match(compact.stdout, /--help/);
+    assert.doesNotMatch(compact.stdout, /\| Card \||### Card|## Catalogue/);
+    const md = path.join(p.root, 'catalogue.md');
+    const json = path.join(p.root, 'catalogue.json');
+    const exported = run('--md', md, '--json', json);
+    assert.equal(exported.status, 0, exported.stderr);
+    assert.equal(exported.stdout, compact.stdout);
+    assert.match(fs.readFileSync(md, 'utf8'), /\| Card \| `app-card` \|/);
+    assert.equal(JSON.parse(fs.readFileSync(json, 'utf8')).components.length, 1);
     assert.match(run('--details').stdout, /## Réutiliser un composant[\s\S]*### Card/);
+    assert.equal(run('--quiet', '--details', '--md', md).stdout, '');
+    assert.match(fs.readFileSync(md, 'utf8'), /### Card/);
+  } finally { p.close(); }
+});
+
+test('CLI help works without scanning and includes practical examples', () => {
+  for (const flag of ['--help', '-h']) {
+    const result = spawnSync(process.execPath, ['--import', 'tsx', cli, '/does-not-exist/inventory-project', flag], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stderr, '');
+    assert.match(result.stdout, /Par défaut : résumé/);
+    assert.match(result.stdout, /angular-inventory \. --search "carte" --limit 3/);
+    assert.match(result.stdout, /--details/);
+    assert.match(result.stdout, /--quiet/);
+  }
+});
+
+test('CLI without arguments scans the current directory and handles an empty project', () => {
+  const p = project({});
+  try {
+    const run = () => spawnSync(process.execPath, ['--import', import.meta.resolve('tsx'), cli], { cwd: p.root, encoding: 'utf8' });
+    const empty = run();
+    assert.equal(empty.status, 0, empty.stderr);
+    assert.match(empty.stdout, /Aucun composant Angular détecté/);
+    assert.match(empty.stdout, /--help/);
+    fs.writeFileSync(path.join(p.root, 'card.ts'), component('Card'));
+    const populated = run();
+    assert.equal(populated.status, 0, populated.stderr);
+    assert.match(populated.stdout, /1 composant détecté/);
+  } finally { p.close(); }
+});
+
+test('CLI summary stays bounded on large catalogues, including piped stdout', () => {
+  const p = project(Object.fromEntries(Array.from({ length: 100 }, (_, i) => [`card${i}.ts`, component(`Card${i}`)])));
+  try {
+    const result = spawnSync(process.execPath, ['--import', 'tsx', cli, p.root], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /100 composants détectés/);
+    assert.ok(result.stdout.trim().split('\n').length <= 10);
+    assert.doesNotMatch(result.stdout, /Card99|Concepts en doublon|Quasi-composants/);
+  } finally { p.close(); }
+});
+
+test('CLI compact search shows reuse essentials while details and Markdown retain snippets', () => {
+  const p = project({
+    'card.ts': `@Component({selector:'app-card',standalone:true}) export class Card { user = input.required<string>(); }`,
+    'page.ts': `@Component({selector:'app-page',template:'<app-card [user]="currentUser" />'}) export class Page {}`,
+  });
+  try {
+    const run = (...extra: string[]) => spawnSync(process.execPath, ['--import', 'tsx', cli, p.root, '--search', 'card', '--limit', '1', ...extra], { encoding: 'utf8' });
+    const compact = run();
+    assert.equal(compact.status, 0, compact.stderr);
+    assert.match(compact.stdout, /1\. Card — app-card/);
+    assert.match(compact.stdout, /Import : import \{ Card \} from "\.\/card"/);
+    assert.match(compact.stdout, /Chemin relatif à la racine/);
+    assert.match(compact.stdout, /Intégration : standalone/);
+    assert.match(compact.stdout, /Entrées requises : user/);
+    assert.match(compact.stdout, /Usage : page.ts:1/);
+    assert.match(compact.stdout, /Pourquoi : Nom exact/);
+    assert.doesNotMatch(compact.stdout, /```|currentUser|### Card/);
+    const md = path.join(p.root, 'candidates.md');
+    const exported = run('--md', md);
+    assert.equal(exported.status, 0, exported.stderr);
+    assert.equal(exported.stdout, compact.stdout);
+    assert.match(fs.readFileSync(md, 'utf8'), /```html\n<app-card \[user\]="currentUser"/);
+    const detailed = run('--details');
+    assert.equal(detailed.status, 0, detailed.stderr);
+    assert.equal(detailed.stdout.trim(), fs.readFileSync(md, 'utf8').trim());
+    const missing = spawnSync(process.execPath, ['--import', 'tsx', cli, p.root, '--search', 'missing'], { encoding: 'utf8' });
+    assert.equal(missing.status, 0, missing.stderr);
+    assert.match(missing.stdout, /Aucun candidat trouvé/);
+    assert.match(missing.stdout, /Un résultat vide ne prouve pas/);
+    assert.match(missing.stdout, /--md COMPONENTS.md/);
   } finally { p.close(); }
 });
 

@@ -2,21 +2,31 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { scan, toMarkdown, searchComponents, searchToMarkdown } from './inventory.js';
+import { inventoryToTerminal, searchToTerminal } from './terminal.js';
 
 const args = process.argv.slice(2);
 const usage = `Usage: angular-inventory [dir] [--search <termes>] [--limit <nombre>] [--json <file>] [--md <file>] [--details] [--quiet]
 
-Catalogue des composants Angular et informations pour les réutiliser.
+Retrouve les composants Angular existants et les informations pour les réutiliser.
+Par défaut : résumé du scan ou candidats compacts, avec import, entrées et usage.
 
   dir             racine à scanner (défaut : .)
-  --search <texte> recherche lexicale expliquée (nom, sélecteur, synonymes, chemin)
+  --search <texte> recherche lexicale avec synonymes UI limités (FR/EN)
   --limit <n>      nombre maximal de candidats (défaut : 5, avec --search)
   --json <file>   écrit le catalogue ou les résultats de recherche en JSON
-  --md <file>     écrit le rapport Markdown
-  --details       ajoute au rapport une fiche de réutilisation par composant (volumineux)
-  --quiet         masque le rapport sur stdout
+  --md <file>     écrit le catalogue ou les fiches de recherche en Markdown
+  --details       affiche le rapport complet ; ajoute les fiches au catalogue Markdown
+  --quiet         masque stdout, conserve les exports et les avertissements
   --help, -h      affiche cette aide
 
+Exemples :
+  angular-inventory .
+  angular-inventory . --search "carte" --limit 3
+  angular-inventory . --search "card" --details
+  angular-inventory . --md COMPONENTS.md --quiet
+  angular-inventory . --json components.json --quiet
+
+Les exports conservent leur contenu, même avec un affichage terminal compact.
 Dans un dépôt Git, respecte les fichiers ignorés. Exclut les tests et les copies Stryker.
 Les imports relatifs du rapport partent de la racine analysée et doivent être adaptés.`;
 
@@ -45,16 +55,18 @@ try {
   const inv = scan(dir ?? '.');
   const query = opts.get('--search');
   const results = query ? searchComponents(inv, query, limit) : undefined;
-  const md = results ? searchToMarkdown(results, query!) : toMarkdown(inv, { details });
   const data = results ? { root: inv.root, scannedAt: inv.scannedAt, scope: inv.scope, query, results } : inv;
   for (const warning of inv.scope.warnings) console.error(`Attention : ${warning}`);
   const jsonOut = opts.get('--json');
   const mdOut = opts.get('--md');
+  const md = mdOut || (details && !quiet)
+    ? (results ? searchToMarkdown(results, query!) : toMarkdown(inv, { details })) : undefined;
   if (jsonOut) fs.writeFileSync(path.resolve(jsonOut), JSON.stringify(data, null, 2));
-  if (mdOut) fs.writeFileSync(path.resolve(mdOut), md);
-  if (!quiet) console.log(md);
+  if (mdOut) fs.writeFileSync(path.resolve(mdOut), md!);
+  if (!quiet) console.log(details ? md : results ? searchToTerminal(results, query!) : inventoryToTerminal(inv));
   if (jsonOut || mdOut) console.error(`\nÉcrit : ${[jsonOut, mdOut].filter(Boolean).join(', ')}`);
 } catch (error) {
   console.error(`Erreur : ${error instanceof Error ? error.message : String(error)}`);
+  console.error('Aide et exemples : angular-inventory --help');
   process.exitCode = 1;
 }
