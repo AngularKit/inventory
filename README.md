@@ -19,12 +19,16 @@ npx @angularkit/inventory . --json components.json
 
 Analyse statique via l'API du compilateur TypeScript (pas besoin de compiler le projet, pas besoin d'Angular installé). Zéro réseau, zéro télémétrie : rien ne sort du poste.
 
-Ignore `node_modules`, `dist`, `.nx`, `.angular`, `coverage`, `*.spec.ts`, `*.stories.ts`.
+Dans un dépôt Git, analyse le contenu local actuel des fichiers suivis et des fichiers non ignorés, y compris les nouveaux fichiers non commités. Respecte les règles Git imbriquées ; un fichier déjà suivi reste analysé même s’il correspond à une règle d’exclusion Git.
 
-## Limites connues (v0.1)
+Ignore notamment `node_modules`, `dist`, `.nx`, `.angular`, `coverage`, `.stryker-tmp`, `__tests__`, `__mocks__`, `test-utils`, `test-helpers`, `*.spec.ts`, `*.test.ts`, `*.stories.ts`, `*.d.ts`, `test-setup.ts` et `setup-tests.ts`. Ne suit pas les liens symboliques.
 
-- Les usages sont comptés par regex sur les templates : `<app-card` et `[appHighlight]`. Les sélecteurs de classe ou complexes sont ignorés.
-- Le clustering est lexical (nom + synonymes), pas sémantique. Il produit des faux positifs assumés : mieux vaut trop signaler que rater un doublon.
+Hors dépôt Git ou sans Git disponible, applique les exclusions intégrées et signale que les règles `.gitignore` ne sont pas appliquées.
+
+## Limites connues
+
+- Les usages sont comptés sur les balises des templates : éléments, attributs, et combinaisons comme `button[kb-button]` ou `[first][second]`. Les commentaires et le contenu des scripts/styles sont ignorés ; une balise n’est comptée qu’une fois par composant. Les sélecteurs de classe, valeurs d’attributs et pseudo-classes ne sont pas pris en charge. Ce lecteur statique ne remplace pas le parseur Angular.
+- Les groupes par concept sont lexicaux (nom + synonymes), pas sémantiques. Ils peuvent rapprocher des composants distincts. Les répétitions CSS sont des pistes à examiner, pas des recommandations automatiques d’extraction.
 - Un composant `templateUrl` pointant hors du projet n'est pas résolu.
 - Outil fourni « as is ».
 
@@ -67,7 +71,7 @@ Mise en place, une seule fois :
     Settings → Actions → General, d'abord au niveau de l'organisation (sinon la case est grisée dans le repo),
     puis dans le repo.
 - **npm, au choix** :
-  - Secret `NPM_TOKEN` (automation token, bypass 2FA) dans le repo. Indispensable pour la toute première publication.
+  - Secret `NPM_TOKEN` (token granulaire autorisé à publier sur le scope, bypass 2FA) dans le repo. Indispensable pour la toute première publication.
   - Ensuite, **Trusted Publishing (recommandé, sans token)** : sur npmjs.com → package → *Settings* →
     *Trusted Publisher* : repo `AngularKit/inventory`, workflow `release.yml`, environnement `npm`.
     Le secret peut alors être supprimé.
