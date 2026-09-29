@@ -2,7 +2,7 @@
 
 [Français](https://github.com/AngularKit/inventory/blob/main/README.md) | **English**
 
-Before creating an Angular component, find what your project already has and see how to reuse it.
+Find existing Angular components, with the information you need to reuse them.
 
 Inventory scans your source files and suggests components with their imports, required inputs, and examples already present in your project. Read the results in your terminal or share them with a coding agent.
 
@@ -11,12 +11,31 @@ Inventory scans your source files and suggests components with their imports, re
 With Node.js 18 or later, open a terminal at the root of your Angular project and run:
 
 ```bash
-npx @angularkit/inventory . --md COMPONENTS.md
+npx @angularkit/inventory . --search "card" --limit 3
 ```
 
-Open `COMPONENTS.md`: the catalogue contains one row per component, with its selector, inputs/outputs, detected usages, and import when resolved. Source files are unchanged; your chosen output file is created or overwritten.
+Each result brings together the component, its import, required inputs, a usage reference, and the reason it matched. Add `--details` to read usage snippets and full integration information. `--help` (or `-h`) lists options and examples.
 
-Replace `.` with another project’s path to scan it. The report is saved relative to the directory where you run the command.
+A real excerpt from this repository’s demo project, produced by `node dist/cli.js fixture --search "card" --limit 1` after `npm ci && npm run build` (terminal output is currently in French):
+
+```text
+1. UiCard — ui-card
+   Source : libs/ui/src/lib/card/card.ts
+   Import : import { UiCard } from "./libs/ui/src/index";
+   Chemin relatif à la racine analysée ; à adapter au fichier appelant.
+   Intégration : standalone/NgModule à vérifier
+   Entrées requises : title
+   Usage : apps/web/src/app/dashboard/dashboard-page.html:1
+   Pourquoi : Nom ou sélecteur : card
+```
+
+Replace `.` with another project’s path to scan it. Without `--search`, the command shows a scan summary and next actions. Source files are unchanged.
+
+## Why use it alongside your editor?
+
+If you already know a component’s name, your editor’s search may be enough. Inventory gathers the information needed to reuse it in one output: its resolved import, declared required inputs, and existing usages with file names and line numbers. You can also give this context to a coding agent.
+
+Search remains lexical, with a few interface synonyms: it does not automatically understand every domain-specific need or guarantee that a candidate fits. Existing usages help you check.
 
 ## Find a component to reuse
 
@@ -27,7 +46,11 @@ npx @angularkit/inventory . --search "carte" --limit 3
 npx @angularkit/inventory . --search "profile card" --limit 3
 ```
 
-Each candidate explains why it matches and provides available reuse information: an import, required inputs, standalone or NgModule integration, and existing usage snippets with file names and line numbers.
+Each candidate shows the essentials. To see the full reuse cards, including usage snippets and detected NgModules:
+
+```bash
+npx @angularkit/inventory . --search "profile card" --limit 3 --details
+```
 
 1. Check existing usages to decide whether the component meets your needs.
 2. Use the suggested import. For a relative import, adjust its path to your calling file: the suggested path starts at the scanned project root.
@@ -40,6 +63,9 @@ If no result fits, try a component name or selector, rephrase your query, or bro
 ## Save and share results
 
 ```bash
+# Full catalogue, one row per component
+npx @angularkit/inventory . --md COMPONENTS.md
+
 # Full catalogue with a reuse card for each component
 npx @angularkit/inventory . --md COMPONENTS.md --details
 
@@ -50,7 +76,11 @@ npx @angularkit/inventory . --json components.json
 npx @angularkit/inventory . --search "card" --md candidates.md --json candidates.json
 ```
 
-Without an output option, the report appears in your terminal. Add `--quiet` to hide that report while still saving files. `--help` lists the available options. Report headings and terminal help are currently in French.
+The terminal shows a summary or compact candidates, even when exporting a file. `--details` displays the full report in the terminal and adds reuse cards to the Markdown catalogue. A search Markdown export always includes full reuse cards; JSON keeps all data.
+
+Open `COMPONENTS.md` to browse the catalogue. Output files are created or overwritten, relative to the directory where you run the command. Add `--quiet` to suppress stdout while still saving files; warnings and write confirmations remain on stderr. Report headings and terminal help are currently in French.
+
+If you previously redirected stdout to a Markdown file, use `--md file.md --quiet` instead. Redirected output keeps the new compact format; `--details` produces the detailed report on stdout.
 
 For a coding agent, generate the compact catalogue without `--details`, then add this instruction to your `AGENTS.md` or `CLAUDE.md`:
 

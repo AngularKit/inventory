@@ -2,7 +2,7 @@
 
 **Français** | [English](https://github.com/AngularKit/inventory/blob/main/README.en.md)
 
-Avant de créer un composant Angular, trouve celui que ton projet possède déjà et vois comment le réutiliser.
+Retrouve les composants Angular existants, avec les informations nécessaires pour les réutiliser.
 
 Inventory analyse tes sources et propose des composants avec leur import, leurs entrées requises et des exemples déjà présents dans le projet. Tu peux lire le résultat dans le terminal ou le partager avec un agent de développement.
 
@@ -11,12 +11,31 @@ Inventory analyse tes sources et propose des composants avec leur import, leurs 
 Avec Node.js 18 ou plus récent, ouvre un terminal à la racine de ton projet Angular, puis lance :
 
 ```bash
-npx @angularkit/inventory . --md COMPONENTS.md
+npx @angularkit/inventory . --search "carte" --limit 3
 ```
 
-Ouvre `COMPONENTS.md` : le catalogue contient une ligne par composant, avec son sélecteur, ses entrées/sorties, ses usages détectés et son import lorsqu’il est résolu. Aucun fichier source n’est modifié ; le fichier de sortie choisi est créé ou remplacé.
+Chaque résultat regroupe le composant, son import, ses entrées requises, une référence d’usage et la raison de la correspondance. Ajoute `--details` pour lire les extraits d’usage et les informations d’intégration complètes. `--help` (ou `-h`) présente les options et des exemples.
 
-Tu peux remplacer `.` par le chemin d’un autre projet. Le rapport est enregistré dans le dossier depuis lequel tu lances la commande.
+Extrait réel du projet de démonstration de ce dépôt, obtenu avec `node dist/cli.js fixture --search "card" --limit 1` après `npm ci && npm run build` :
+
+```text
+1. UiCard — ui-card
+   Source : libs/ui/src/lib/card/card.ts
+   Import : import { UiCard } from "./libs/ui/src/index";
+   Chemin relatif à la racine analysée ; à adapter au fichier appelant.
+   Intégration : standalone/NgModule à vérifier
+   Entrées requises : title
+   Usage : apps/web/src/app/dashboard/dashboard-page.html:1
+   Pourquoi : Nom ou sélecteur : card
+```
+
+Tu peux remplacer `.` par le chemin d’un autre projet. Sans `--search`, la commande affiche un résumé du scan et les actions suivantes. Aucun fichier source n’est modifié.
+
+## Pourquoi l’utiliser en complément de l’éditeur ?
+
+Si tu connais le nom du composant, la recherche de ton éditeur peut suffire. Inventory rassemble en une seule sortie les informations pour passer à la réutilisation : l’import résolu, les entrées requises déclarées et des usages existants avec fichier et ligne. Tu peux aussi fournir ce contexte à un agent de développement.
+
+La recherche reste lexicale, avec quelques synonymes d’interface : elle ne comprend pas automatiquement tous les besoins métier et ne garantit pas qu’un candidat convient. Les usages existants permettent de le vérifier.
 
 ## Trouver un composant à réutiliser
 
@@ -27,7 +46,11 @@ npx @angularkit/inventory . --search "carte" --limit 3
 npx @angularkit/inventory . --search "profile card" --limit 3
 ```
 
-Chaque candidat explique pourquoi il correspond et fournit les informations disponibles pour le réutiliser : import, entrées requises, intégration standalone ou NgModule, et extraits d’usages avec fichier et ligne.
+Chaque candidat affiche les informations essentielles. Pour consulter les fiches complètes avec les extraits d’usages et les NgModules détectés :
+
+```bash
+npx @angularkit/inventory . --search "profile card" --limit 3 --details
+```
 
 1. Vérifie que le composant répond au besoin en consultant ses usages existants.
 2. Reprends l’import proposé. S’il est relatif, adapte son chemin au fichier où tu l’utilises : il part de la racine analysée.
@@ -40,6 +63,9 @@ Si aucun résultat ne convient, essaie le nom ou le sélecteur du composant, ref
 ## Enregistrer et partager les résultats
 
 ```bash
+# Catalogue complet, une ligne par composant
+npx @angularkit/inventory . --md COMPONENTS.md
+
 # Catalogue complet avec une fiche de réutilisation par composant
 npx @angularkit/inventory . --md COMPONENTS.md --details
 
@@ -50,7 +76,11 @@ npx @angularkit/inventory . --json components.json
 npx @angularkit/inventory . --search "card" --md candidates.md --json candidates.json
 ```
 
-Sans option de sortie, le rapport s’affiche dans le terminal. Ajoute `--quiet` pour masquer ce rapport tout en enregistrant les fichiers. `--help` affiche les options disponibles. Les titres des rapports et l’aide du terminal sont actuellement en français.
+Le terminal affiche un résumé ou des candidats compacts, même quand tu exportes un fichier. `--details` affiche le rapport complet dans le terminal et ajoute les fiches de réutilisation au catalogue Markdown. Un export Markdown de recherche contient toujours les fiches complètes ; le JSON conserve toutes les données.
+
+Ouvre `COMPONENTS.md` pour consulter le catalogue. Les fichiers de sortie sont créés ou remplacés, relativement au dossier depuis lequel tu lances la commande. Ajoute `--quiet` pour masquer stdout tout en enregistrant les fichiers ; les avertissements et confirmations d’écriture restent sur stderr. Les titres des rapports et l’aide du terminal sont actuellement en français.
+
+Si tu redirigeais auparavant stdout vers un fichier Markdown, utilise désormais `--md fichier.md --quiet`. Une redirection conserve le nouvel affichage compact ; `--details` permet d’obtenir le rapport détaillé sur stdout.
 
 Pour un agent, génère le catalogue compact sans `--details`, puis ajoute cette consigne dans ton `AGENTS.md` ou `CLAUDE.md` :
 
