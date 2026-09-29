@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/AngularKit/inventory/compare/v0.2.0...v0.2.1) (2026-09-29)
+
+
+### Corrections
+
+* **docs:** repair language links from npm ([#10](https://github.com/AngularKit/inventory/issues/10)) ([a3c04e8](https://github.com/AngularKit/inventory/commit/a3c04e8738121e3473be6e554e4257dd76a374fb))
+
 ## [0.2.0](https://github.com/AngularKit/inventory/compare/v0.1.0...v0.2.0) (2026-09-29)
 
 
