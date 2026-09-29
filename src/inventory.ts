@@ -1,6 +1,8 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import ts from 'typescript';
+import { matchesSelector, templateTags } from './templates.js';
+import { collectFiles, type ScanScope } from './files.js';
 
 // ---------- Types ----------
 
@@ -30,6 +32,7 @@ export interface ClassPattern {
 export interface Inventory {
   root: string;
   scannedAt: string;
+  scope: ScanScope;
   components: ComponentInfo[];
   clusters: Cluster[];
   quasiComponents: ClassPattern[];
@@ -39,23 +42,6 @@ export interface Inventory {
     private: number;
     unused: number;
   };
-}
-
-// ---------- Filesystem walk ----------
-
-const IGNORED_DIRS = new Set([
-  'node_modules', 'dist', '.nx', '.angular', 'coverage', '.git', 'tmp', 'out-tsc', 'storybook-static',
-]);
-
-function walk(dir: string, acc: string[] = []): string[] {
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (entry.isDirectory()) {
-      if (!IGNORED_DIRS.has(entry.name)) walk(path.join(dir, entry.name), acc);
-    } else if (entry.isFile()) {
-      acc.push(path.join(dir, entry.name));
-    }
-  }
-  return acc;
 }
 
 // ---------- Decorator extraction ----------
@@ -81,7 +67,7 @@ function decoratorArg(d: ts.Decorator): ts.ObjectLiteralExpression | undefined {
 
 function stringProp(obj: ts.ObjectLiteralExpression, name: string): string | undefined {
   for (const p of obj.properties) {
-    if (ts.isPropertyAssignment(p) && p.name.getText() === name) {
+    if (ts.isPropertyAssignment(p) && p.name.getText().replace(/^['"]|['"]$/g, '') === name) {
       const init = p.initializer;
       if (ts.isStringLiteral(init) || ts.isNoSubstitutionTemplateLiteral(init)) return init.text;
     }
@@ -101,8 +87,10 @@ function signalKind(init: ts.Expression | undefined): 'input' | 'output' | undef
   return undefined;
 }
 
-function extractComponents(sourceFile: ts.SourceFile, root: string): Omit<ComponentInfo, 'public' | 'usages' | 'usedIn'>[] {
-  const result: Omit<ComponentInfo, 'public' | 'usages' | 'usedIn'>[] = [];
+type ExtractedComponent = Omit<ComponentInfo, 'public' | 'usages' | 'usedIn'>;
+
+function extractComponents(sourceFile: ts.SourceFile, root: string): ExtractedComponent[] {
+  const result: ExtractedComponent[] = [];
   const visit = (node: ts.Node) => {
     if (ts.isClassDeclaration(node) && node.name) {
       const dec = decoratorsOf(node).find((d) => decoratorName(d) === 'Component');
@@ -187,20 +175,6 @@ function publicFiles(entryFiles: string[]): Set<string> {
   return seen;
 }
 
-// ---------- Usage counting ----------
-
-function escapeRe(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/** Regex matching a selector inside a template: `<app-card` or `appHighlight` as attribute. */
-function selectorRegex(selector: string): RegExp | undefined {
-  const attr = selector.match(/^\[([\w-]+)\]$/);
-  if (attr) return new RegExp(`[\\s(\\[]\\(?\\[?${escapeRe(attr[1])}\\]?[\\s=>\\]/)]`, 'g');
-  if (/^[\w-]+$/.test(selector)) return new RegExp(`<${escapeRe(selector)}[\\s>/]`, 'g');
-  return undefined; // class selectors, complex selectors: skipped
-}
-
 // ---------- Clustering by concept ----------
 
 const SYNONYMS: string[][] = [
@@ -273,7 +247,7 @@ function classSignatures(template: string): string[] {
 
 export function scan(rootInput: string): Inventory {
   const root = path.resolve(rootInput);
-  const files = walk(root);
+  const { files, scope } = collectFiles(root);
   const tsFiles = files.filter((f) => f.endsWith('.ts') && !f.endsWith('.spec.ts') && !f.endsWith('.d.ts') && !f.endsWith('.stories.ts'));
   const htmlFiles = files.filter((f) => f.endsWith('.html'));
 
@@ -301,21 +275,16 @@ export function scan(rootInput: string): Inventory {
   const pub = publicFiles(entries);
   for (const c of components) c.public = pub.has(path.join(root, c.file));
 
-  // Usages
+  const parsedTemplates = new Map([...templates].map(([file, text]) => [file, templateTags(text)]));
   for (const c of components) {
     const own = new Set([c.templateFile, c.file + '#' + c.className].filter(Boolean));
-    for (const sel of c.selectors) {
-      const re = selectorRegex(sel);
-      if (!re) continue;
-      for (const [tplFile, tpl] of templates) {
-        if (own.has(tplFile)) continue;
-        const n = tpl.match(re)?.length ?? 0;
-        if (n > 0) {
-          c.usages += n;
-          const fileOnly = tplFile.split('#')[0];
-          if (!c.usedIn.includes(fileOnly)) c.usedIn.push(fileOnly);
-        }
-      }
+    for (const [tplFile, tags] of parsedTemplates) {
+      if (own.has(tplFile)) continue;
+      const matches = tags.filter((tag) => c.selectors.some((selector) => matchesSelector(tag, selector)));
+      if (!matches.length) continue;
+      c.usages += matches.length;
+      const fileOnly = tplFile.split('#')[0];
+      if (!c.usedIn.includes(fileOnly)) c.usedIn.push(fileOnly);
     }
   }
 
@@ -340,6 +309,7 @@ export function scan(rootInput: string): Inventory {
   return {
     root,
     scannedAt: new Date().toISOString(),
+    scope,
     components,
     clusters,
     quasiComponents,
@@ -361,8 +331,11 @@ export function toMarkdown(inv: Inventory): string {
   L.push(`Racine : \`${inv.root}\`  `);
   L.push(`**${stats.total} composants** — ${stats.public} exportés (API publique), ${stats.private} privés, ${stats.unused} jamais référencés dans un template.`, '');
 
+  L.push(`Périmètre : ${inv.scope.mode === 'git' ? 'fichiers suivis et fichiers non ignorés par Git' : 'fichiers locaux avec exclusions intégrées'}. Les fichiers de tests et copies Stryker sont exclus.`, '');
+  for (const warning of inv.scope.warnings) L.push(`> ${warning}`, '');
+
   if (inv.clusters.length) {
-    L.push(`## Concepts en doublon potentiel`, '');
+    L.push(`## Concepts en doublon potentiel`, '', 'Rapprochements lexicaux à examiner : ce ne sont pas des doublons confirmés.', '');
     L.push(`| Concept | Nb | Composants |`, `|---|---|---|`);
     for (const c of inv.clusters) L.push(`| ${c.concept} | ${c.components.length} | ${c.components.join(', ')} |`);
     L.push('');
@@ -370,7 +343,7 @@ export function toMarkdown(inv: Inventory): string {
 
   if (inv.quasiComponents.length) {
     L.push(`## Quasi-composants (mêmes classes CSS répétées)`, '');
-    L.push(`Signatures de classes (≥ 4 classes) répétées ≥ 3 fois dans ≥ 2 fichiers : un composant qui n'a jamais été extrait.`, '');
+    L.push(`Signatures de classes (≥ 4 classes) répétées ≥ 3 fois dans ≥ 2 fichiers. Ces répétitions sont des pistes à examiner, pas une recommandation automatique d’extraction.`, '');
     for (const q of inv.quasiComponents.slice(0, 15)) {
       L.push(`- **×${q.count}** dans ${q.files.length} fichiers — \`${q.classes}\``);
     }
