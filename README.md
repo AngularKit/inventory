@@ -50,7 +50,7 @@ Chaque composant expose `standalone` (`true`, `false` ou `null`), `ngModules`, `
 
 ## Utilisation avec un agent
 
-Génère `COMPONENTS.md` (compact : une ligne par composant, avec son import) et référence-le depuis ton `CLAUDE.md` / `AGENTS.md` :
+Génère `COMPONENTS.md` (compact : une ligne par composant, avec l'instruction d'import complète, y compris les exports renommés ou par défaut) et référence-le depuis ton `CLAUDE.md` / `AGENTS.md` :
 
 > Avant de créer un composant UI, lis `COMPONENTS.md` et réutilise l'existant.
 

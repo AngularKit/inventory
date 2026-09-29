@@ -320,3 +320,21 @@ test('Git fallback distinguishes absent Git, outside repositories and other fata
     }
   } finally { p.close(); }
 });
+
+test('compact Markdown retains renamed and default import syntax', () => {
+  const p = project({
+    'tsconfig.json': JSON.stringify({compilerOptions:{baseUrl:'.',paths:{'@demo/ui':['index.ts']}}}),
+    'card.ts': component('Card'),
+    'index.ts': "export { Card as PublicCard } from './card';",
+    'default.ts': '@Component({selector:"app-default"}) export default class DefaultCard {}',
+  });
+  try {
+    const inv = scan(p.root), md = toMarkdown(inv);
+    const cardRow = md.split('\n').find((line) => line.startsWith('| Card |'))!;
+    assert.ok(cardRow.includes('import { PublicCard as Card } from "@demo/ui";'));
+    const defaultRow = md.split('\n').find((line) => line.startsWith('| DefaultCard |'))!;
+    assert.ok(defaultRow.includes('import DefaultCard from "./default";'));
+    assert.doesNotMatch(md, /### Card/);
+    assert.match(md, /--details/);
+  } finally { p.close(); }
+});
