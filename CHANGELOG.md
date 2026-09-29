@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.0](https://github.com/AngularKit/inventory/compare/v0.2.1...v0.3.0) (2026-09-29)
+
+
+### ⚠ BREAKING CHANGES
+
+* **cli:** stdout now uses compact terminal output, including when redirected. Use --md file.md --quiet to save a report or --details for the full report on stdout. JSON and Markdown API outputs are unchanged.
+
+### Fonctionnalités
+
+* **cli:** simplify terminal output and surface reuse guidance ([#15](https://github.com/AngularKit/inventory/issues/15)) ([cb3de3d](https://github.com/AngularKit/inventory/commit/cb3de3dac0f2d8b8e0aed967ed0bdf5dd7188f3f))
+
 ## [0.2.1](https://github.com/AngularKit/inventory/compare/v0.2.0...v0.2.1) (2026-09-29)
 
 
