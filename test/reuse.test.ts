@@ -5,7 +5,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { scan, toMarkdown } from '../src/inventory.js';
+import { scan, searchComponents, searchToMarkdown, toMarkdown } from '../src/inventory.js';
 
 function project(files: Record<string, string>, git = false) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'inventory-test-'));
@@ -143,13 +143,55 @@ test('usage excerpts point to real external and inline template lines', () => {
   } finally { p.close(); }
 });
 
+test('search explains exact and synonym matches, filters all terms, and respects the limit', () => {
+  const p = project({ 'card.ts': component('Card'), 'profile-tile.ts': component('ProfileTile'), 'button.ts': component('Button') });
+  try {
+    const inv = scan(p.root);
+    const results = searchComponents(inv, 'card');
+    assert.deepEqual(results.map((r) => r.component.className), ['Card', 'ProfileTile']);
+    assert.ok(results[0].reasons.some((r) => r.includes('Nom exact')));
+    assert.ok(results[1].reasons.some((r) => r.includes('Synonyme')));
+    assert.equal(searchComponents(inv, 'card', 1).length, 1);
+    assert.deepEqual(searchComponents(inv, 'card profile').map((r) => r.component.className), ['ProfileTile']);
+    assert.deepEqual(searchComponents(inv, '   '), []);
+    assert.match(searchToMarkdown([], 'missing'), /Aucun candidat/);
+    assert.ok(searchComponents(inv, 'app-card')[0].reasons.some((r) => r.includes('Sélecteur exact')));
+  } finally { p.close(); }
+});
+
 const cli = fileURLToPath(new URL('../src/cli.ts', import.meta.url));
+test('equal lexical evidence ranks components the project reuses before demos sorted first by path', () => {
+  const p = project({
+    'a-docs/button-demo.ts': `@Component({selector:'button-demo'}) export class ButtonDemo {}`,
+    'lib/button.ts': `@Component({selector:'button[lib-button]'}) export class LibButton {}`,
+    'app/page.ts': `@Component({selector:'app-page',template:'<button lib-button>Ok</button>'}) export class Page {}`,
+  });
+  try {
+    assert.deepEqual(searchComponents(scan(p.root), 'button').map((r) => r.component.className), ['LibButton', 'ButtonDemo']);
+  } finally { p.close(); }
+});
+
 test('CLI rejects missing option values and never scans an accidental positional value', () => {
   for (const args of [['--search'], ['--md'], ['--limit','0'], ['--limit','2'], ['--unknown']]) {
     const result = spawnSync(process.execPath, ['--import', 'tsx', cli, ...args], {encoding:'utf8'});
     assert.equal(result.status, 1, JSON.stringify(args));
     assert.match(result.stderr, /Erreur/);
   }
+});
+
+test('CLI search emits reusable JSON and Markdown, with query options before the directory', () => {
+  const p = project({ 'card.ts': component('Card') });
+  try {
+    const json = path.join(p.root, 'result.json');
+    const md = path.join(p.root, 'result.md');
+    const result = spawnSync(process.execPath, ['--import','tsx',cli,'--search','card',p.root,'--limit','1','--quiet','--json',json,'--md',md], {encoding:'utf8'});
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, '');
+    const data = JSON.parse(fs.readFileSync(json,'utf8'));
+    assert.equal(data.query, 'card');
+    assert.equal(data.results[0].component.className, 'Card');
+    assert.match(fs.readFileSync(md,'utf8'), /Pourquoi : Nom exact/);
+  } finally { p.close(); }
 });
 
 test('CLI catalogue stays compact by default; --details adds one reuse sheet per component', () => {
@@ -256,6 +298,42 @@ test('standalone defaults depend on Angular major; NgModules identify declaratio
       assert.equal(scan(p.root).components.find((c) => c.className === 'Legacy')!.ngModules[0].exported, true);
     } finally { p.close(); }
   }
+});
+
+test('search indexes descriptions, aliased inputs, outputs and literal template labels with evidence', () => {
+  const p = project({
+    'picker.ts': `/** Choisir la couleur du profil. */
+@Component({selector:'palette-control',template:'<input placeholder="Chercher une nuance" [title]="secretBinding" /><img alt="{{ secretInterpolation }}"><span data-value=\\'title="secretAttribute"\\'></span><style>.secretCss {}</style><!-- secretComment -->'})
+export class Palette { value = input('', {alias:'teinte'}); confirmed = output(); }`,
+    'list.ts': `@Component({selector:'plain-list',template:'<ul><li>Un élément</li></ul>'}) export class List {}`,
+    'icon.ts': component('Icon'),
+  });
+  try {
+    const inv = scan(p.root);
+    for (const query of ['choisir couleur', 'chercher nuance', 'teinte', 'confirmed']) {
+      const found = searchComponents(inv, query);
+      assert.deepEqual(found.map((r) => r.component.className), ['Palette'], query);
+      assert.ok(found[0].reasons.some((r) => /Description|template|Entrée ou sortie/.test(r)));
+    }
+    for (const query of ['table', 'avatar', 'secretBinding', 'secretCss', 'secretComment', 'secretInterpolation', 'secretAttribute']) assert.deepEqual(searchComponents(inv, query), [], query);
+    assert.deepEqual(searchComponents(inv, 'les couleurs du profil').map((r) => r.component.className), ['Palette']);
+  } finally { p.close(); }
+});
+
+test('strong name matches rank first and drop template mentions, not documented candidates; host accessibility labels are searchable', () => {
+  const p = project({
+    'card.ts': component('ProductCard'),
+    'page.ts': `@Component({template:'<p>Product card</p>'}) export class Page {}`,
+    'teaser.ts': `/** Compact product card for listings. */ @Component({selector:'app-teaser'}) export class Teaser {}`,
+    'picker.ts': `@Component({selector:'theme-picker',host:{'aria-label':'Couleur'}}) export class ThemePicker {}`,
+  });
+  try {
+    const inv = scan(p.root);
+    assert.deepEqual(searchComponents(inv, 'product card').map((r) => r.component.className), ['ProductCard', 'Teaser']);
+    assert.ok(searchComponents(inv, 'product card')[1].reasons.some((r) => r.includes('Description')));
+    assert.deepEqual(searchComponents(inv, 'choisir couleur').map((r) => r.component.className), ['ThemePicker']);
+    assert.ok(searchComponents(inv, 'choisir couleur')[0].reasons.some((r) => r.includes('template')));
+  } finally { p.close(); }
 });
 
 test('computed metadata remains unknown and module declarations do not overwrite standalone metadata', () => {
