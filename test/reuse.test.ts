@@ -351,3 +351,68 @@ test('computed metadata remains unknown and module declarations do not overwrite
     assert.equal(components.find((c) => c.className === 'Explicit')!.standalone, true);
   } finally { p.close(); }
 });
+
+test('a broken Git repository fails instead of including ignored files', () => {
+  const p = project({
+    '.gitignore': 'ignored/\n',
+    'ignored/copy.ts': component('IgnoredCopy'),
+    'real.ts': component('Real'),
+  }, true);
+  try {
+    fs.writeFileSync(path.join(p.root, '.git/config'), '[broken config\n');
+    assert.throws(() => scan(p.root), /Échec de git ls-files[\s\S]*bad config/);
+  } finally { p.close(); }
+});
+
+test('Git fallback distinguishes absent Git, outside repositories and other fatal errors', () => {
+  const p = project({ 'real.ts': component('Real') });
+  const bin = path.join(p.root, 'bin');
+  fs.mkdirSync(bin);
+  const run = () => spawnSync(process.execPath, ['--import', 'tsx', cli, p.root], {
+    encoding: 'utf8', env: { ...process.env, PATH: bin, LANG: 'fr_FR.UTF-8' },
+  });
+  try {
+    const missing = run();
+    assert.equal(missing.status, 0, missing.stderr);
+    assert.match(missing.stderr, /Git indisponible ou dossier hors dépôt/);
+    const fakeGit = (diagnostic: string) => fs.writeFileSync(path.join(bin, 'git'),
+      `#!/bin/sh\nprintf '%s\\n' '${diagnostic}' >&2\nexit 128\n`, { mode: 0o755 });
+    for (const diagnostic of [
+      'fatal: not a git repository (or any of the parent directories): .git',
+      'fatal: not a git repository (or any parent up to mount point /)',
+    ]) {
+      fakeGit(diagnostic);
+      const outside = run();
+      assert.equal(outside.status, 0, outside.stderr);
+    }
+    for (const diagnostic of [
+      'fatal: detected dubious ownership in repository',
+      'fatal: bad config line 1 in file .git/config',
+      'fatal: not a git repository: /invalid-explicit-git-dir',
+    ]) {
+      fakeGit(diagnostic);
+      const failure = run();
+      assert.equal(failure.status, 1, diagnostic);
+      assert.match(failure.stderr, /Échec de git ls-files/);
+      assert.doesNotMatch(failure.stdout, /Inventaire des composants/);
+    }
+  } finally { p.close(); }
+});
+
+test('compact Markdown retains renamed and default import syntax', () => {
+  const p = project({
+    'tsconfig.json': JSON.stringify({compilerOptions:{baseUrl:'.',paths:{'@demo/ui':['index.ts']}}}),
+    'card.ts': component('Card'),
+    'index.ts': "export { Card as PublicCard } from './card';",
+    'default.ts': '@Component({selector:"app-default"}) export default class DefaultCard {}',
+  });
+  try {
+    const inv = scan(p.root), md = toMarkdown(inv);
+    const cardRow = md.split('\n').find((line) => line.startsWith('| Card |'))!;
+    assert.ok(cardRow.includes('import { PublicCard as Card } from "@demo/ui";'));
+    const defaultRow = md.split('\n').find((line) => line.startsWith('| DefaultCard |'))!;
+    assert.ok(defaultRow.includes('import DefaultCard from "./default";'));
+    assert.doesNotMatch(md, /### Card/);
+    assert.match(md, /--details/);
+  } finally { p.close(); }
+});

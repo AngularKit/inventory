@@ -36,6 +36,8 @@ Ignore notamment `node_modules`, `dist`, `.nx`, `.angular`, `coverage`, `.stryke
 
 Hors dépôt Git ou sans Git disponible, applique les exclusions intégrées et signale que les règles `.gitignore` ne sont pas appliquées.
 
+Une erreur Git dans un dépôt existant (configuration invalide, accès refusé, etc.) arrête l'analyse. Elle ne déclenche pas un scan qui contournerait les exclusions Git.
+
 ## Retrouver et réutiliser
 
 ```bash
@@ -66,7 +68,7 @@ Chaque composant expose `description`, `templateText`, `standalone` (`true`, `fa
 
 ## Utilisation avec un agent
 
-Génère `COMPONENTS.md` (compact : une ligne par composant, avec son import) et référence-le depuis ton `CLAUDE.md` / `AGENTS.md` :
+Génère `COMPONENTS.md` (compact : une ligne par composant, avec l'instruction d'import complète, y compris les exports renommés ou par défaut) et référence-le depuis ton `CLAUDE.md` / `AGENTS.md` :
 
 > Avant de créer un composant UI, consulte `COMPONENTS.md` ou lance `npx @angularkit/inventory . --search "<besoin>"`. Examine les candidats, leurs imports, leurs entrées requises et leurs usages existants, puis dis si tu réutilises, adaptes, ou si rien ne convient.
 
