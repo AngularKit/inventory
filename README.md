@@ -19,7 +19,7 @@ npx @angularkit/inventory . --md COMPONENTS.md --details # + une fiche de réuti
 ## Ce que ça sort
 
 - **Réutilisation** : imports vérifiés à partir des exports et des alias TypeScript du projet, entrées requises déclarées (types et noms de binding), extraits d’usages existants avec fichier et ligne. Les imports relatifs partent de la racine analysée : adapte-les au fichier appelant.
-- **Recherche** : noms, sélecteurs, entrées/sorties, descriptions JSDoc et textes littéraux des templates (dont labels accessibles). Normalise les accents et quelques équivalences françaises/anglaises ; chaque terme significatif doit correspondre. Les raisons indiquent la source de chaque correspondance. Les chemins se recherchent explicitement avec `/`. Aucun modèle ni réseau.
+- **Recherche en français et en anglais** : `carte` / `card`, `bouton` / `button`, `formulaire` / `form`. Recherche dans les noms, sélecteurs, entrées/sorties, descriptions JSDoc et textes littéraux des templates (dont labels accessibles). Normalise les accents et quelques équivalences françaises/anglaises ; chaque terme significatif doit correspondre. Ce vocabulaire limité ne traduit pas toutes les demandes : les résultats dépendent aussi des mots présents dans le projet. Les raisons indiquent la source de chaque correspondance. Les chemins se recherchent explicitement avec `/`. Aucun modèle ni réseau.
 - **Intégration** : statut standalone explicite ou déduit de la version Angular, NgModules déclarant/exportant directement le composant. Le statut reste inconnu si les métadonnées ne permettent pas de conclure.
 - **Catalogue** : chaque `@Component`, son sélecteur, ses inputs/outputs (décorateurs et API signal), s'il est exporté par un `index.ts`/`public-api.ts`, combien de fois et où il est utilisé.
 - **Concepts en doublon** : `ProfileCardComponent`, `StatTile`, `OrderPanel` et `UiCard` sont regroupés sous *card* (synonymes : card/tile/panel/box, modal/dialog/popup, …).
@@ -48,6 +48,8 @@ npx @angularkit/inventory . --search "profile card" --json candidates.json --md 
 Chaque résultat indique pourquoi il correspond, comment l’importer si un export est confirmé, les entrées requises déclarées et jusqu’à trois exemples de balises existantes. Un nom ou sélecteur exact est favorisé, et les composants dont le nom couvre tous les termes passent en premier. Dans ce cas, les candidats trouvés seulement grâce au texte d'un template (une page qui *mentionne* « product card ») sont écartés ; ceux trouvés via leur description ou leurs entrées restent proposés. Les synonymes se limitent au vocabulaire UI générique (card/tile/carte, dialog/modal, table/tableau…) : une liste n’est pas un tableau, une icône n’est pas un avatar. La recherche reste lexicale.
 
 Un résultat vide signifie qu'aucune correspondance n'a été détectée, pas qu'aucun composant adapté n'existe : reformule avec un terme présent dans le projet ou consulte le catalogue.
+
+Le vocabulaire bilingue couvre aussi des concepts d'interface comme `consentement` / `consent`, `déconnexion` / `logout` et `historique` / `history`. Les termes métier sont recherchés dans les noms, descriptions et textes du projet ; ils ne sont pas traduits automatiquement par un dictionnaire propre aux projets de test.
 
 Sans `--search`, le JSON contient l'inventaire complet. Avec `--search`, il contient `query` et `results` (`component`, `score`, `reasons`) ; le score est un classement lexical, pas une probabilité.
 

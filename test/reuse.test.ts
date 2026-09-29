@@ -416,3 +416,27 @@ test('compact Markdown retains renamed and default import syntax', () => {
     assert.match(md, /--details/);
   } finally { p.close(); }
 });
+
+test('common interface concepts work in French and English without product-specific synonyms', () => {
+  const p = project({
+    'consent.ts': component('ConsentToggle'),
+    'logout.ts': component('LogoutButton'),
+    'history.ts': component('HistoryPanel'),
+    'summary.ts': component('SummaryCard'),
+    'equipment.ts': component('EquipmentForm'),
+  });
+  try {
+    const inv = scan(p.root);
+    for (const [fr, en, expected] of [
+      ['consentement', 'consent', 'ConsentToggle'],
+      ['déconnexion', 'logout', 'LogoutButton'],
+      ['historique', 'history', 'HistoryPanel'],
+      ['récapitulatif', 'summary', 'SummaryCard'],
+    ]) {
+      for (const query of [fr, en]) assert.equal(searchComponents(inv, query)[0]?.component.className, expected, query);
+    }
+    assert.deepEqual(searchComponents(inv, 'matériel'), []);
+    fs.writeFileSync(path.join(p.root, 'equipment.ts'), '/** Gestion du matériel. */\n' + component('EquipmentForm'));
+    assert.equal(searchComponents(scan(p.root), 'matériel')[0]?.component.className, 'EquipmentForm');
+  } finally { p.close(); }
+});
