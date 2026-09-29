@@ -20,7 +20,7 @@
   "files": [
     "dist",
     "README.md",
-    "docs"
+    "README.en.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",

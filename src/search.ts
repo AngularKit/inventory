@@ -1,5 +1,7 @@
-import type { Inventory, SearchResult } from './inventory.js';
+import type { ComponentInfo, Inventory, SearchResult } from './inventory.js';
 
+// Generic UI vocabulary only: project-specific terms belong in the project's own names and docs.
+// A list is not a table and an icon is not an avatar, so those stay in separate groups.
 const GROUPS = [
   ['card', 'tile', 'carte', 'vignette'], ['dialog', 'modal', 'dialogue'],
   ['button', 'btn', 'bouton'], ['input', 'field', 'champ'],
@@ -7,16 +9,14 @@ const GROUPS = [
   ['list', 'liste'], ['table', 'tableau', 'datagrid'],
   ['notification', 'toast', 'snackbar'], ['progress', 'progression'],
   ['badge', 'chip'], ['tag', 'etiquette'], ['tab', 'onglet'],
-  ['avatar'], ['icon', 'icone'], ['image'], ['form', 'formulaire'],
+  ['icon', 'icone'], ['form', 'formulaire'],
   ['search', 'chercher', 'rechercher', 'recherche'], ['color', 'colour', 'couleur'],
-  ['theme'], ['dark', 'sombre'], ['light', 'clair'],
-  ['reading', 'lecture'], ['article', 'post'], ['testimonial', 'temoignage'],
-  ['consent', 'consentement'], ['logout', 'deconnexion', 'deconnecter'],
+  ['dark', 'sombre'], ['light', 'clair'],
   ['next', 'suivant', 'suivante'], ['previous', 'precedent', 'precedente'],
-  ['lesson', 'lecon'], ['navigation', 'nav'], ['video'],
-  ['equipment', 'materiel', 'equipement'], ['workout', 'entrainement'],
-  ['history', 'historique'], ['summary', 'bilan'], ['completed', 'termine'],
-  ['edit', 'editor', 'editeur'], ['online', 'ligne'],
+  ['navigation', 'nav'], ['edit', 'editor', 'editeur'],
+  // Common interface concepts, independent of a particular product domain.
+  ['consent', 'consentement'], ['logout', 'deconnexion', 'deconnecter'],
+  ['history', 'historique'], ['summary', 'resume', 'recapitulatif'],
 ];
 const STOP = new Set(['a', 'au', 'aux', 'de', 'du', 'des', 'd', 'le', 'la', 'les', 'l', 'un', 'une', 'en', 'et', 'pour', 'avec', 'the', 'an', 'of', 'for', 'with', 'and']);
 const normalize = (text: string) => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
@@ -25,43 +25,83 @@ const wordsOf = (text: string) => normalize(text.replace(/([a-z\d])([A-Z])/g, '$
 const concepts = new Map(GROUPS.flatMap((group) => group.map((word) => [word, group[0]] as const)));
 const concept = (word: string) => concepts.get(word) ?? word;
 
+interface Field { label: string; tokens: string[]; weight: number; incidental?: boolean }
+interface Evidence { points: number; reason: string; incidental: boolean }
+
+const matchesConcept = (tokens: string[], word: string) => tokens.some((token) => concept(token) === concept(word));
+
+function fieldsOf(component: ComponentInfo, withPath: boolean): Field[] {
+  const fields: Field[] = [
+    { label: 'Nom ou sélecteur', tokens: wordsOf([component.className, ...component.selectors].join(' ')), weight: 8 },
+    { label: 'Entrée ou sortie', tokens: wordsOf([...component.inputs, ...component.outputs, ...component.inputDetails.map((i) => i.binding)].join(' ')), weight: 5 },
+    { label: 'Description', tokens: wordsOf(component.description), weight: 4 },
+    // Template text is written for end users, not to describe the component: it may be an incidental mention.
+    { label: 'Texte du template', tokens: wordsOf(component.templateText), weight: 2, incidental: true },
+  ];
+  // File paths are searchable explicitly, but a parent directory alone must not make
+  // every child component a candidate for a product concept (e.g. products/*).
+  if (withPath) fields.push({ label: 'Chemin', tokens: wordsOf(component.file), weight: 1 });
+  return fields;
+}
+
+/** Strongest evidence for one query word; a literal match counts double a synonym. */
+function bestEvidence(fields: Field[], word: string): Evidence | undefined {
+  let best: Evidence | undefined;
+  for (const field of fields) {
+    const literal = field.tokens.includes(word);
+    if (!literal && !matchesConcept(field.tokens, word)) continue;
+    const points = field.weight * (literal ? 2 : 1);
+    if (!best || points > best.points) {
+      best = { points, reason: `${literal ? '' : 'Synonyme — '}${field.label} : ${word}`, incidental: !!field.incidental };
+    }
+  }
+  return best;
+}
+
+interface Scored extends SearchResult { nameCovers: boolean; incidental: boolean }
+
+// Equal lexical evidence: prefer what the project actually reuses (template or route
+// references), then its public API, over an alphabetical path that favours demos and docs.
+const reuse = (c: ComponentInfo) => c.usages + c.routeReferences.length;
+const rank = (a: Scored, b: Scored) => Number(b.nameCovers) - Number(a.nameCovers)
+  || b.score - a.score
+  || reuse(b.component) - reuse(a.component)
+  || Number(b.component.public) - Number(a.component.public)
+  || a.component.file.localeCompare(b.component.file)
+  || a.component.className.localeCompare(b.component.className);
+
 /** All query terms require traceable lexical evidence. No semantic confidence is implied. */
 export function search(inv: Inventory, query: string, limit: number): SearchResult[] {
   const words = [...new Set(wordsOf(query).filter((word) => !STOP.has(word)))];
   if (!words.length) return [];
   const exact = normalize(query.trim());
-  const results: (SearchResult & { nameOnly: boolean })[] = [];
+  const results: Scored[] = [];
   for (const component of inv.components) {
-    const fields: { label: string; tokens: string[]; weight: number }[] = [
-      { label: 'Nom ou sélecteur', tokens: wordsOf([component.className, ...component.selectors].join(' ')), weight: 8 },
-      { label: 'Entrée ou sortie', tokens: wordsOf([...component.inputs, ...component.outputs, ...component.inputDetails.map((i) => i.binding)].join(' ')), weight: 5 },
-      { label: 'Description', tokens: wordsOf(component.description ?? ''), weight: 4 },
-      { label: 'Texte du template', tokens: wordsOf(component.templateText ?? ''), weight: 2 },
-    ];
-    // File paths are searchable explicitly, but a parent directory alone must not make
-    // every child component a candidate for a product concept (e.g. products/*).
-    if (query.includes('/')) fields.push({ label: 'Chemin', tokens: wordsOf(component.file), weight: 1 });
+    const fields = fieldsOf(component, query.includes('/'));
     let score = 0;
+    let incidental = false;
     const reasons: string[] = [];
     for (const word of words) {
-      let best: { points: number; reason: string } | undefined;
-      for (const field of fields) {
-        const literal = field.tokens.includes(word);
-        const synonym = !literal && field.tokens.some((token) => concept(token) === concept(word));
-        if (!literal && !synonym) continue;
-        const points = field.weight * (literal ? 2 : 1);
-        if (!best || points > best.points) best = { points, reason: `${synonym ? 'Synonyme — ' : ''}${field.label} : ${word}` };
-      }
-      if (!best) { score = 0; break; }
-      score += best.points;
-      reasons.push(best.reason);
+      const evidence = bestEvidence(fields, word);
+      if (!evidence) { score = 0; break; }
+      score += evidence.points;
+      incidental ||= evidence.incidental;
+      reasons.push(evidence.reason);
     }
-    if (normalize(component.className) === exact) { score += 100; reasons.unshift(`Nom exact : ${query.trim()}`); }
+    const exactName = normalize(component.className) === exact;
+    if (exactName) { score += 100; reasons.unshift(`Nom exact : ${query.trim()}`); }
     else if (component.selectors.some((s) => normalize(s) === exact)) { score += 100; reasons.unshift(`Sélecteur exact : ${query.trim()}`); }
-    if (score) results.push({ component, score, reasons, nameOnly: words.every((word) => fields[0].tokens.some((token) => concept(token) === concept(word))) || normalize(component.className) === exact });
+    if (!score) continue;
+    const nameCovers = exactName || words.every((word) => matchesConcept(fields[0].tokens, word));
+    results.push({ component, score, reasons, nameCovers, incidental });
   }
-  // Prefer candidates whose names cover the whole request over incidental mentions
-  // in a parent page, input or description. Keep weaker evidence when no such candidate exists.
-  const candidates = results.some((r) => r.nameOnly) ? results.filter((r) => r.nameOnly) : results;
-  return candidates.sort((a, b) => b.score - a.score || a.component.file.localeCompare(b.component.file) || a.component.className.localeCompare(b.component.className)).slice(0, Math.max(0, limit)).map(({ nameOnly: _nameOnly, ...result }) => result);
+  // When a name covers the whole request, drop candidates relying on template text:
+  // a parent page mentioning "product card" is not a product card. Candidates found
+  // through a description or an input stay, ranked after the name matches.
+  const hasNameMatch = results.some((r) => r.nameCovers);
+  return results
+    .filter((r) => !hasNameMatch || r.nameCovers || !r.incidental)
+    .sort(rank)
+    .slice(0, Math.max(0, limit))
+    .map(({ component, score, reasons }) => ({ component, score, reasons }));
 }

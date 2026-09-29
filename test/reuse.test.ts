@@ -160,6 +160,17 @@ test('search explains exact and synonym matches, filters all terms, and respects
 });
 
 const cli = fileURLToPath(new URL('../src/cli.ts', import.meta.url));
+test('equal lexical evidence ranks components the project reuses before demos sorted first by path', () => {
+  const p = project({
+    'a-docs/button-demo.ts': `@Component({selector:'button-demo'}) export class ButtonDemo {}`,
+    'lib/button.ts': `@Component({selector:'button[lib-button]'}) export class LibButton {}`,
+    'app/page.ts': `@Component({selector:'app-page',template:'<button lib-button>Ok</button>'}) export class Page {}`,
+  });
+  try {
+    assert.deepEqual(searchComponents(scan(p.root), 'button').map((r) => r.component.className), ['LibButton', 'ButtonDemo']);
+  } finally { p.close(); }
+});
+
 test('CLI rejects missing option values and never scans an accidental positional value', () => {
   for (const args of [['--search'], ['--md'], ['--limit','0'], ['--limit','2'], ['--unknown']]) {
     const result = spawnSync(process.execPath, ['--import', 'tsx', cli, ...args], {encoding:'utf8'});
@@ -180,6 +191,18 @@ test('CLI search emits reusable JSON and Markdown, with query options before the
     assert.equal(data.query, 'card');
     assert.equal(data.results[0].component.className, 'Card');
     assert.match(fs.readFileSync(md,'utf8'), /Pourquoi : Nom exact/);
+  } finally { p.close(); }
+});
+
+test('CLI catalogue stays compact by default; --details adds one reuse sheet per component', () => {
+  const p = project({ 'card.ts': component('Card') });
+  try {
+    const run = (...extra: string[]) => spawnSync(process.execPath, ['--import','tsx',cli,p.root,...extra], {encoding:'utf8'});
+    const compact = run();
+    assert.equal(compact.status, 0, compact.stderr);
+    assert.match(compact.stdout, /\| Card \| `app-card` \|/);
+    assert.doesNotMatch(compact.stdout, /### Card/);
+    assert.match(run('--details').stdout, /## Réutiliser un composant[\s\S]*### Card/);
   } finally { p.close(); }
 });
 
@@ -269,7 +292,8 @@ test('standalone defaults depend on Angular major; NgModules identify declaratio
       assert.equal(inv.components.find((c) => c.className === 'Auto')!.standalone, expected);
       assert.equal(legacy.standalone, false);
       assert.deepEqual(legacy.ngModules, [{name:'InternalModule',file:'module.ts',exported:false}]);
-      assert.match(toMarkdown(inv), /déclaré mais non exporté/);
+      assert.match(toMarkdown(inv, { details: true }), /déclaré mais non exporté/);
+      assert.doesNotMatch(toMarkdown(inv), /## Réutiliser un composant/);
       fs.writeFileSync(path.join(p.root,'module.ts'), `import {Legacy} from './legacy'; @NgModule({declarations:[Legacy],exports:[Legacy]}) export class PublicModule {}`);
       assert.equal(scan(p.root).components.find((c) => c.className === 'Legacy')!.ngModules[0].exported, true);
     } finally { p.close(); }
@@ -296,15 +320,17 @@ export class Palette { value = input('', {alias:'teinte'}); confirmed = output()
   } finally { p.close(); }
 });
 
-test('strong name matches avoid incidental mentions; host accessibility labels are searchable', () => {
+test('strong name matches rank first and drop template mentions, not documented candidates; host accessibility labels are searchable', () => {
   const p = project({
     'card.ts': component('ProductCard'),
     'page.ts': `@Component({template:'<p>Product card</p>'}) export class Page {}`,
+    'teaser.ts': `/** Compact product card for listings. */ @Component({selector:'app-teaser'}) export class Teaser {}`,
     'picker.ts': `@Component({selector:'theme-picker',host:{'aria-label':'Couleur'}}) export class ThemePicker {}`,
   });
   try {
     const inv = scan(p.root);
-    assert.deepEqual(searchComponents(inv, 'product card').map((r) => r.component.className), ['ProductCard']);
+    assert.deepEqual(searchComponents(inv, 'product card').map((r) => r.component.className), ['ProductCard', 'Teaser']);
+    assert.ok(searchComponents(inv, 'product card')[1].reasons.some((r) => r.includes('Description')));
     assert.deepEqual(searchComponents(inv, 'choisir couleur').map((r) => r.component.className), ['ThemePicker']);
     assert.ok(searchComponents(inv, 'choisir couleur')[0].reasons.some((r) => r.includes('template')));
   } finally { p.close(); }
@@ -323,5 +349,94 @@ test('computed metadata remains unknown and module declarations do not overwrite
     assert.equal(components.find((c) => c.className === 'Dynamic')!.standalone, null);
     assert.equal(components.find((c) => c.className === 'Spread')!.standalone, null);
     assert.equal(components.find((c) => c.className === 'Explicit')!.standalone, true);
+  } finally { p.close(); }
+});
+
+test('a broken Git repository fails instead of including ignored files', () => {
+  const p = project({
+    '.gitignore': 'ignored/\n',
+    'ignored/copy.ts': component('IgnoredCopy'),
+    'real.ts': component('Real'),
+  }, true);
+  try {
+    fs.writeFileSync(path.join(p.root, '.git/config'), '[broken config\n');
+    assert.throws(() => scan(p.root), /Échec de git ls-files[\s\S]*bad config/);
+  } finally { p.close(); }
+});
+
+test('Git fallback distinguishes absent Git, outside repositories and other fatal errors', () => {
+  const p = project({ 'real.ts': component('Real') });
+  const bin = path.join(p.root, 'bin');
+  fs.mkdirSync(bin);
+  const run = () => spawnSync(process.execPath, ['--import', 'tsx', cli, p.root], {
+    encoding: 'utf8', env: { ...process.env, PATH: bin, LANG: 'fr_FR.UTF-8' },
+  });
+  try {
+    const missing = run();
+    assert.equal(missing.status, 0, missing.stderr);
+    assert.match(missing.stderr, /Git indisponible ou dossier hors dépôt/);
+    const fakeGit = (diagnostic: string) => fs.writeFileSync(path.join(bin, 'git'),
+      `#!/bin/sh\nprintf '%s\\n' '${diagnostic}' >&2\nexit 128\n`, { mode: 0o755 });
+    for (const diagnostic of [
+      'fatal: not a git repository (or any of the parent directories): .git',
+      'fatal: not a git repository (or any parent up to mount point /)',
+    ]) {
+      fakeGit(diagnostic);
+      const outside = run();
+      assert.equal(outside.status, 0, outside.stderr);
+    }
+    for (const diagnostic of [
+      'fatal: detected dubious ownership in repository',
+      'fatal: bad config line 1 in file .git/config',
+      'fatal: not a git repository: /invalid-explicit-git-dir',
+    ]) {
+      fakeGit(diagnostic);
+      const failure = run();
+      assert.equal(failure.status, 1, diagnostic);
+      assert.match(failure.stderr, /Échec de git ls-files/);
+      assert.doesNotMatch(failure.stdout, /Inventaire des composants/);
+    }
+  } finally { p.close(); }
+});
+
+test('compact Markdown retains renamed and default import syntax', () => {
+  const p = project({
+    'tsconfig.json': JSON.stringify({compilerOptions:{baseUrl:'.',paths:{'@demo/ui':['index.ts']}}}),
+    'card.ts': component('Card'),
+    'index.ts': "export { Card as PublicCard } from './card';",
+    'default.ts': '@Component({selector:"app-default"}) export default class DefaultCard {}',
+  });
+  try {
+    const inv = scan(p.root), md = toMarkdown(inv);
+    const cardRow = md.split('\n').find((line) => line.startsWith('| Card |'))!;
+    assert.ok(cardRow.includes('import { PublicCard as Card } from "@demo/ui";'));
+    const defaultRow = md.split('\n').find((line) => line.startsWith('| DefaultCard |'))!;
+    assert.ok(defaultRow.includes('import DefaultCard from "./default";'));
+    assert.doesNotMatch(md, /### Card/);
+    assert.match(md, /--details/);
+  } finally { p.close(); }
+});
+
+test('common interface concepts work in French and English without product-specific synonyms', () => {
+  const p = project({
+    'consent.ts': component('ConsentToggle'),
+    'logout.ts': component('LogoutButton'),
+    'history.ts': component('HistoryPanel'),
+    'summary.ts': component('SummaryCard'),
+    'equipment.ts': component('EquipmentForm'),
+  });
+  try {
+    const inv = scan(p.root);
+    for (const [fr, en, expected] of [
+      ['consentement', 'consent', 'ConsentToggle'],
+      ['déconnexion', 'logout', 'LogoutButton'],
+      ['historique', 'history', 'HistoryPanel'],
+      ['récapitulatif', 'summary', 'SummaryCard'],
+    ]) {
+      for (const query of [fr, en]) assert.equal(searchComponents(inv, query)[0]?.component.className, expected, query);
+    }
+    assert.deepEqual(searchComponents(inv, 'matériel'), []);
+    fs.writeFileSync(path.join(p.root, 'equipment.ts'), '/** Gestion du matériel. */\n' + component('EquipmentForm'));
+    assert.equal(searchComponents(scan(p.root), 'matériel')[0]?.component.className, 'EquipmentForm');
   } finally { p.close(); }
 });
