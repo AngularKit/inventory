@@ -36,6 +36,8 @@ Ignore notamment `node_modules`, `dist`, `.nx`, `.angular`, `coverage`, `.stryke
 
 Hors dépôt Git ou sans Git disponible, applique les exclusions intégrées et signale que les règles `.gitignore` ne sont pas appliquées.
 
+Une erreur Git dans un dépôt existant (configuration invalide, accès refusé, etc.) arrête l'analyse. Elle ne déclenche pas un scan qui contournerait les exclusions Git.
+
 ## Retrouver et réutiliser
 
 ```bash
@@ -46,6 +48,8 @@ npx @angularkit/inventory . --search "profile card" --json candidates.json --md 
 Chaque résultat indique pourquoi il correspond, comment l’importer si un export est confirmé, les entrées requises déclarées et jusqu’à trois exemples de balises existantes. Un nom ou sélecteur exact est favorisé, et les composants dont le nom couvre tous les termes passent en premier. Dans ce cas, les candidats trouvés seulement grâce au texte d'un template (une page qui *mentionne* « product card ») sont écartés ; ceux trouvés via leur description ou leurs entrées restent proposés. Les synonymes se limitent au vocabulaire UI générique (card/tile/carte, dialog/modal, table/tableau…) : une liste n’est pas un tableau, une icône n’est pas un avatar. La recherche reste lexicale.
 
 Un résultat vide signifie qu'aucune correspondance n'a été détectée, pas qu'aucun composant adapté n'existe : reformule avec un terme présent dans le projet ou consulte le catalogue.
+
+Le vocabulaire bilingue couvre aussi des concepts d'interface comme `consentement` / `consent`, `déconnexion` / `logout` et `historique` / `history`. Les termes métier sont recherchés dans les noms, descriptions et textes du projet ; ils ne sont pas traduits automatiquement par un dictionnaire propre aux projets de test.
 
 Sans `--search`, le JSON contient l'inventaire complet. Avec `--search`, il contient `query` et `results` (`component`, `score`, `reasons`) ; le score est un classement lexical, pas une probabilité.
 
@@ -66,7 +70,7 @@ Chaque composant expose `description`, `templateText`, `standalone` (`true`, `fa
 
 ## Utilisation avec un agent
 
-Génère `COMPONENTS.md` (compact : une ligne par composant, avec son import) et référence-le depuis ton `CLAUDE.md` / `AGENTS.md` :
+Génère `COMPONENTS.md` (compact : une ligne par composant, avec l'instruction d'import complète, y compris les exports renommés ou par défaut) et référence-le depuis ton `CLAUDE.md` / `AGENTS.md` :
 
 > Avant de créer un composant UI, consulte `COMPONENTS.md` ou lance `npx @angularkit/inventory . --search "<besoin>"`. Examine les candidats, leurs imports, leurs entrées requises et leurs usages existants, puis dis si tu réutilises, adaptes, ou si rien ne convient.
 

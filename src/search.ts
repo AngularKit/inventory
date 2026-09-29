@@ -14,6 +14,9 @@ const GROUPS = [
   ['dark', 'sombre'], ['light', 'clair'],
   ['next', 'suivant', 'suivante'], ['previous', 'precedent', 'precedente'],
   ['navigation', 'nav'], ['edit', 'editor', 'editeur'],
+  // Common interface concepts, independent of a particular product domain.
+  ['consent', 'consentement'], ['logout', 'deconnexion', 'deconnecter'],
+  ['history', 'historique'], ['summary', 'resume', 'recapitulatif'],
 ];
 const STOP = new Set(['a', 'au', 'aux', 'de', 'du', 'des', 'd', 'le', 'la', 'les', 'l', 'un', 'une', 'en', 'et', 'pour', 'avec', 'the', 'an', 'of', 'for', 'with', 'and']);
 const normalize = (text: string) => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();

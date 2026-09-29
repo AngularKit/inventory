@@ -458,8 +458,8 @@ export function toMarkdown(inv: Inventory, options: MarkdownOptions = {}): strin
   L.push(`## Catalogue`, '');
   L.push(`| Composant | Sélecteur | Public | Usages | Inputs | Outputs | Import | Fichier |`, `|---|---|---|---|---|---|---|---|`);
   for (const c of inv.components) {
-    const from = c.imports[0]?.from;
-    L.push(`| ${c.className} | \`${c.selectors.join(', ') || '—'}\` | ${c.public ? '✅' : '—'} | ${c.usages} | ${c.inputs.join(', ') || '—'} | ${c.outputs.join(', ') || '—'} | ${from ? `\`${from}\`` : '—'} | ${c.file} |`);
+    const statement = c.imports[0]?.statement.replace(/\|/g, '\\|');
+    L.push(`| ${c.className} | \`${c.selectors.join(', ') || '—'}\` | ${c.public ? '✅' : '—'} | ${c.usages} | ${c.inputs.join(', ') || '—'} | ${c.outputs.join(', ') || '—'} | ${statement ? `\`${statement}\`` : '—'} | ${c.file} |`);
   }
   L.push('');
 
