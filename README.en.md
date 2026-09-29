@@ -1,6 +1,6 @@
 # @angularkit/inventory
 
-[Français](README.md) | **English**
+[Français](https://github.com/AngularKit/inventory/blob/main/README.md) | **English**
 
 Before creating an Angular component, find what your project already has and see how to reuse it.
 
