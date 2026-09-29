@@ -1,119 +1,80 @@
 # @angularkit/inventory
 
+**Français** | [English](README.en.md)
+
 Avant de créer un composant Angular, trouve celui que ton projet possède déjà et vois comment le réutiliser.
 
-Pars d'un besoin, examine quelques candidats, puis vérifie leur import, leurs entrées et leurs usages existants. La recherche aide à décider ; elle ne garantit pas que le composant convient.
+Inventory analyse tes sources et propose des composants avec leur import, leurs entrées requises et des exemples déjà présents dans le projet. Tu peux lire le résultat dans le terminal ou le partager avec un agent de développement.
+
+## Démarrer
+
+Avec Node.js 18 ou plus récent, ouvre un terminal à la racine de ton projet Angular, puis lance :
 
 ```bash
-npx @angularkit/inventory .                      # rapport sur stdout
-npx @angularkit/inventory . --md COMPONENTS.md   # catalogue à committer / donner à l'agent
-npx @angularkit/inventory . --json components.json
-npx @angularkit/inventory . --search "card" --limit 3 # candidats avec explications
-npx @angularkit/inventory . --md COMPONENTS.md --details # + une fiche de réutilisation par composant
+npx @angularkit/inventory . --md COMPONENTS.md
 ```
 
-## À côté de Compodoc
+Ouvre `COMPONENTS.md` : le catalogue contient une ligne par composant, avec son sélecteur, ses entrées/sorties, ses usages détectés et son import lorsqu’il est résolu. Aucun fichier source n’est modifié ; le fichier de sortie choisi est créé ou remplacé.
 
-[Compodoc](https://github.com/compodoc/compodoc#features) documente tout le projet (composants, services, routes, graphes…) sous forme de site navigable. Inventory est plus étroit : il répond à « ce composant existe-t-il déjà, et comment je l'utilise ? » pendant une tâche, depuis le terminal ou via un agent. Les deux se combinent.
+Tu peux remplacer `.` par le chemin d’un autre projet. Le rapport est enregistré dans le dossier depuis lequel tu lances la commande.
 
-## Ce que ça sort
+## Trouver un composant à réutiliser
 
-- **Réutilisation** : imports vérifiés à partir des exports et des alias TypeScript du projet, entrées requises déclarées (types et noms de binding), extraits d’usages existants avec fichier et ligne. Les imports relatifs partent de la racine analysée : adapte-les au fichier appelant.
-- **Recherche en français et en anglais** : `carte` / `card`, `bouton` / `button`, `formulaire` / `form`. Recherche dans les noms, sélecteurs, entrées/sorties, descriptions JSDoc et textes littéraux des templates (dont labels accessibles). Normalise les accents et quelques équivalences françaises/anglaises ; chaque terme significatif doit correspondre. Ce vocabulaire limité ne traduit pas toutes les demandes : les résultats dépendent aussi des mots présents dans le projet. Les raisons indiquent la source de chaque correspondance. Les chemins se recherchent explicitement avec `/`. Aucun modèle ni réseau.
-- **Intégration** : statut standalone explicite ou déduit de la version Angular, NgModules déclarant/exportant directement le composant. Le statut reste inconnu si les métadonnées ne permettent pas de conclure.
-- **Catalogue** : chaque `@Component`, son sélecteur, ses inputs/outputs (décorateurs et API signal), s'il est exporté par un `index.ts`/`public-api.ts`, combien de fois et où il est utilisé.
-- **Concepts en doublon** : `ProfileCardComponent`, `StatTile`, `OrderPanel` et `UiCard` sont regroupés sous *card* (synonymes : card/tile/panel/box, modal/dialog/popup, …).
-- **Quasi-composants** : mêmes signatures de classes CSS (≥ 4 classes) copiées-collées dans plusieurs templates — le composant qui n'a jamais été extrait.
-- **Usages** : références dans les templates et dans les formes courantes de routes Angular. « Sans usage confirmé » ne signifie pas « code mort ».
-
-## Comment ça marche
-
-Analyse statique via l'API du compilateur TypeScript (pas besoin de compiler le projet, pas besoin d'Angular installé). Zéro réseau, zéro télémétrie : rien ne sort du poste.
-
-Dans un dépôt Git, analyse le contenu local actuel des fichiers suivis et des fichiers non ignorés, y compris les nouveaux fichiers non commités. Respecte les règles Git imbriquées ; un fichier déjà suivi reste analysé même s’il correspond à une règle d’exclusion Git.
-
-Ignore notamment `node_modules`, `dist`, `.nx`, `.angular`, `coverage`, `.stryker-tmp`, `__tests__`, `__mocks__`, `test-utils`, `test-helpers`, `*.spec.ts`, `*.test.ts`, `*.stories.ts`, `*.d.ts`, `test-setup.ts` et `setup-tests.ts`. Ne suit pas les liens symboliques.
-
-Hors dépôt Git ou sans Git disponible, applique les exclusions intégrées et signale que les règles `.gitignore` ne sont pas appliquées.
-
-Une erreur Git dans un dépôt existant (configuration invalide, accès refusé, etc.) arrête l'analyse. Elle ne déclenche pas un scan qui contournerait les exclusions Git.
-
-## Retrouver et réutiliser
+Décris le besoin avec quelques mots :
 
 ```bash
 npx @angularkit/inventory . --search "carte" --limit 3
-npx @angularkit/inventory . --search "profile card" --json candidates.json --md candidates.md
+npx @angularkit/inventory . --search "profile card" --limit 3
 ```
 
-Chaque résultat indique pourquoi il correspond, comment l’importer si un export est confirmé, les entrées requises déclarées et jusqu’à trois exemples de balises existantes. Un nom ou sélecteur exact est favorisé, et les composants dont le nom couvre tous les termes passent en premier. Dans ce cas, les candidats trouvés seulement grâce au texte d'un template (une page qui *mentionne* « product card ») sont écartés ; ceux trouvés via leur description ou leurs entrées restent proposés. Les synonymes se limitent au vocabulaire UI générique (card/tile/carte, dialog/modal, table/tableau…) : une liste n’est pas un tableau, une icône n’est pas un avatar. La recherche reste lexicale.
+Chaque candidat explique pourquoi il correspond et fournit les informations disponibles pour le réutiliser : import, entrées requises, intégration standalone ou NgModule, et extraits d’usages avec fichier et ligne.
 
-Un résultat vide signifie qu'aucune correspondance n'a été détectée, pas qu'aucun composant adapté n'existe : reformule avec un terme présent dans le projet ou consulte le catalogue.
+1. Vérifie que le composant répond au besoin en consultant ses usages existants.
+2. Reprends l’import proposé. S’il est relatif, adapte son chemin au fichier où tu l’utilises : il part de la racine analysée.
+3. Renseigne les entrées requises et vérifie les dépendances Angular. Un extrait existant peut utiliser des variables propres à son contexte.
 
-Le vocabulaire bilingue couvre aussi des concepts d'interface comme `consentement` / `consent`, `déconnexion` / `logout` et `historique` / `history`. Les termes métier sont recherchés dans les noms, descriptions et textes du projet ; ils ne sont pas traduits automatiquement par un dictionnaire propre aux projets de test.
+La recherche reconnaît certains termes d’interface en français et en anglais : `carte` / `card`, `bouton` / `button`, `formulaire` / `form`. Elle utilise aussi les noms, descriptions, entrées/sorties et textes des templates. Ce n’est pas une traduction générale : les termes métier dépendent du vocabulaire présent dans tes sources.
 
-Sans `--search`, le JSON contient l'inventaire complet. Avec `--search`, il contient `query` et `results` (`component`, `score`, `reasons`) ; le score est un classement lexical, pas une probabilité.
+Si aucun résultat ne convient, essaie le nom ou le sélecteur du composant, reformule, ou consulte le catalogue complet. Une recherche vide ne prouve pas que le composant n’existe pas.
 
-Chaque composant expose `description`, `templateText`, `standalone` (`true`, `false` ou `null`), `ngModules`, `inputDetails`, `imports`, `examples`, `routeReferences` et `usageStatus`. `stats.unused` garde son sens historique (aucun usage dans les templates) ; `stats.unconfirmed` compte les composants sans référence ni dans les templates ni dans les routes.
-
-## Limites connues
-
-- Les usages sont comptés sur les balises des templates : éléments, attributs, et combinaisons comme `button[kb-button]` ou `[first][second]`. Les commentaires et le contenu des scripts/styles sont ignorés ; une balise n’est comptée qu’une fois par composant. Les sélecteurs de classe, valeurs d’attributs et pseudo-classes ne sont pas pris en charge. Ce lecteur statique ne remplace pas le parseur Angular.
-- Les groupes par concept sont lexicaux (nom + synonymes), pas sémantiques. Ils peuvent rapprocher des composants distincts. Les répétitions CSS sont des pistes à examiner, pas des recommandations automatiques d’extraction.
-- Les imports sont résolus dans les sources analysées et avec la configuration TypeScript à la racine. Les exports nommés, alias et réexports de valeurs sont suivis ; les exports de types sont exclus. Les imports relatifs doivent être adaptés au contexte d’utilisation et les contraintes de dépendances Nx restent à vérifier.
-- Les entrées requises prises en charge sont celles déclarées directement avec `@Input`, `input.required` ou `model.required`. Les entrées héritées, les alias des fonctions Angular importées et les métadonnées dynamiques ne sont pas résolus.
-- Les routes prises en charge sont les objets avec `path` ou `matcher`, une propriété `component` référant à une classe locale/importée, ou `loadComponent: () => import(...).then(m => m.Classe)` (et un import direct pour un export par défaut). Les fonctions nommées et alias `const` dans le même fichier sont suivis, avec protection contre les cycles et les paramètres qui masquent un nom. Les fonctions importées, appels arbitraires et bindings mutables ne sont pas résolus. Les autres formes et créations dynamiques restent non confirmées.
-- Le défaut standalone est déduit de la version Angular installée ou d’une version majeure explicite dans package.json (standalone par défaut depuis Angular 19). Les tableaux littéraux `declarations`/`exports` des NgModules sont analysés ; les réexports transitifs de modules et les métadonnées calculées ne sont pas suivis. Un import TypeScript valide ne garantit pas une intégration Angular valide.
-- Les descriptions et textes enrichissent la recherche, mais les synonymes sont limités. Les expressions Angular, traductions calculées et textes chargés à l’exécution ne sont pas évalués. Une correspondance lexicale n’est pas une garantie fonctionnelle.
-- Un extrait de balise montre le code existant ; ce n’est pas un exemple autonome avec toutes ses variables et dépendances.
-- Un composant `templateUrl` pointant hors du projet n'est pas résolu.
-- Outil fourni « as is ».
-
-## Utilisation avec un agent
-
-Génère `COMPONENTS.md` (compact : une ligne par composant, avec l'instruction d'import complète, y compris les exports renommés ou par défaut) et référence-le depuis ton `CLAUDE.md` / `AGENTS.md` :
-
-> Avant de créer un composant UI, consulte `COMPONENTS.md` ou lance `npx @angularkit/inventory . --search "<besoin>"`. Examine les candidats, leurs imports, leurs entrées requises et leurs usages existants, puis dis si tu réutilises, adaptes, ou si rien ne convient.
-
-`--details` ajoute une fiche complète par composant : pratique pour un petit projet, mais le fichier grossit vite (≈ 20 lignes par composant).
-
-## Évaluer l'utilité
-
-Les [critères d'évaluation](https://github.com/AngularKit/inventory/blob/main/docs/EVALUATION.md) distinguent une réponse directe, une piste utile et un résultat hors sujet. Ils séparent aussi la pertinence de recherche, la validité de l'intégration et le temps réellement gagné pendant une tâche.
-
-## Développement
+## Enregistrer et partager les résultats
 
 ```bash
-npm ci
-npm test            # tests node:test sur le fixture
-npm run dev -- fixture
-npm run build
+# Catalogue complet avec une fiche de réutilisation par composant
+npx @angularkit/inventory . --md COMPONENTS.md --details
+
+# Inventaire exploitable par un script
+npx @angularkit/inventory . --json components.json
+
+# Résultats d’une recherche en Markdown et en JSON
+npx @angularkit/inventory . --search "card" --md candidates.md --json candidates.json
 ```
 
-## Publier une version
+Sans option de sortie, le rapport s’affiche dans le terminal. Ajoute `--quiet` pour masquer ce rapport tout en enregistrant les fichiers. `--help` affiche les options disponibles. Les titres des rapports et l’aide du terminal sont actuellement en français.
 
-Tout est automatique via [release-please](https://github.com/googleapis/release-please) et les
-[Conventional Commits](https://www.conventionalcommits.org/fr/) :
+Pour un agent, génère le catalogue compact sans `--details`, puis ajoute cette consigne dans ton `AGENTS.md` ou `CLAUDE.md` :
 
-1. Les commits sur `main` suivent la convention : `feat: …` (version mineure), `fix: …` (patch),
-   `feat!: …` ou footer `BREAKING CHANGE:` (majeure). Les `chore:`, `docs:`, `refactor:` n'ouvrent pas de release.
-2. release-please ouvre et maintient une PR « chore(main): release X.Y.Z » qui met à jour
-   `package.json` et `CHANGELOG.md`.
-3. Merger cette PR crée le tag `vX.Y.Z`, la GitHub Release, puis publie sur npm avec provenance
-   (`.github/workflows/release.yml`).
+> Avant de créer un composant UI, consulte `COMPONENTS.md` ou lance `npx @angularkit/inventory . --search "<besoin>"`. Examine les candidats, leurs imports, leurs entrées requises et leurs usages existants, puis indique si tu réutilises, adaptes, ou si rien ne convient.
 
-Pour forcer un numéro précis, ajouter un footer `Release-As: 1.2.3` à un commit.
+## Comprendre les résultats
 
-Mise en place, une seule fois :
+- **Usages détectés** : références dans les templates et certaines routes Angular. « Sans usage confirmé » ne signifie pas « code mort » ; les usages dynamiques peuvent échapper à l’analyse.
+- **Imports et entrées** : informations résolues depuis les sources et la configuration TypeScript. Certaines métadonnées calculées et les entrées héritées ne sont pas résolues. Vérifie l’intégration dans ton application.
+- **Groupes de composants et répétitions CSS** : pistes à examiner pour repérer des ressemblances. Ils ne prouvent pas que deux composants sont interchangeables ou doivent être fusionnés.
 
-- **GitHub, au choix** :
-  - **Token dédié (recommandé)** : créer un PAT *fine-grained* limité à ce repo avec *Contents* et
-    *Pull requests* en lecture/écriture, et le poser en secret `RELEASE_PLEASE_TOKEN`. Avantage : la PR de
-    release déclenche la CI, ce qu'une PR ouverte avec `GITHUB_TOKEN` ne fait jamais.
-  - **Sans token** : activer *Allow GitHub Actions to create and approve pull requests* dans
-    Settings → Actions → General, d'abord au niveau de l'organisation (sinon la case est grisée dans le repo),
-    puis dans le repo.
-- **npm, au choix** :
-  - Secret `NPM_TOKEN` (token granulaire autorisé à publier sur le scope, bypass 2FA) dans le repo. Indispensable pour la toute première publication.
-  - Ensuite, **Trusted Publishing (recommandé, sans token)** : sur npmjs.com → package → *Settings* →
-    *Trusted Publisher* : repo `AngularKit/inventory`, workflow `release.yml`, environnement `npm`.
-    Le secret peut alors être supprimé.
+Dans un dépôt Git, le scan lit les fichiers suivis et les nouveaux fichiers non ignorés, avec tes modifications locales. Il exclut notamment les dépendances, les sorties de compilation, les tests, les stories et les copies temporaires de Stryker. Un fichier déjà suivi reste inclus même s’il correspond à une règle `.gitignore`.
+
+Hors dépôt Git ou sans Git disponible, les exclusions intégrées restent actives, mais les règles `.gitignore` ne sont pas appliquées ; un avertissement le signale. Une autre erreur Git arrête le scan.
+
+L’analyse est locale, sans télémétrie ni envoi de tes sources, et ne nécessite pas de compiler ton projet. `npx` peut télécharger l’outil lors de son lancement.
+
+## Avec Compodoc
+
+[Compodoc](https://github.com/compodoc/compodoc#features) fournit une documentation navigable du projet Angular : composants, services, routes et graphes. Inventory se concentre sur une décision pendant le développement : « quel composant puis-je réutiliser, et comment ? », avec une recherche expliquée et des informations directement lisibles dans le terminal ou par un agent. Les deux peuvent se compléter.
+
+## Aller plus loin
+
+- [Signaler un problème](https://github.com/AngularKit/inventory/issues)
+- [Référence technique (français)](https://github.com/AngularKit/inventory/blob/main/docs/REFERENCE.md)
+- [Méthode d’évaluation (français)](https://github.com/AngularKit/inventory/blob/main/docs/EVALUATION.md)
+- [Contribuer (français)](https://github.com/AngularKit/inventory/blob/main/CONTRIBUTING.md)
