@@ -1,17 +1,25 @@
 # @angularkit/inventory
 
-Répond à la question « est-ce que ce composant existe déjà dans ma codebase ? » sans grep ni Slack, et indique comment le réutiliser.
+Avant de créer un composant Angular, trouve celui que ton projet possède déjà et vois comment le réutiliser.
+
+Pars d'un besoin, examine quelques candidats, puis vérifie leur import, leurs entrées et leurs usages existants. La recherche aide à décider ; elle ne garantit pas que le composant convient.
 
 ```bash
 npx @angularkit/inventory .                      # rapport sur stdout
 npx @angularkit/inventory . --md COMPONENTS.md   # catalogue à committer / donner à l'agent
 npx @angularkit/inventory . --json components.json
+npx @angularkit/inventory . --search "card" --limit 3 # candidats avec explications
 npx @angularkit/inventory . --md COMPONENTS.md --details # + une fiche de réutilisation par composant
 ```
+
+## À côté de Compodoc
+
+[Compodoc](https://github.com/compodoc/compodoc#features) documente tout le projet (composants, services, routes, graphes…) sous forme de site navigable. Inventory est plus étroit : il répond à « ce composant existe-t-il déjà, et comment je l'utilise ? » pendant une tâche, depuis le terminal ou via un agent. Les deux se combinent.
 
 ## Ce que ça sort
 
 - **Réutilisation** : imports vérifiés à partir des exports et des alias TypeScript du projet, entrées requises déclarées (types et noms de binding), extraits d’usages existants avec fichier et ligne. Les imports relatifs partent de la racine analysée : adapte-les au fichier appelant.
+- **Recherche en français et en anglais** : `carte` / `card`, `bouton` / `button`, `formulaire` / `form`. Recherche dans les noms, sélecteurs, entrées/sorties, descriptions JSDoc et textes littéraux des templates (dont labels accessibles). Normalise les accents et quelques équivalences françaises/anglaises ; chaque terme significatif doit correspondre. Ce vocabulaire limité ne traduit pas toutes les demandes : les résultats dépendent aussi des mots présents dans le projet. Les raisons indiquent la source de chaque correspondance. Les chemins se recherchent explicitement avec `/`. Aucun modèle ni réseau.
 - **Intégration** : statut standalone explicite ou déduit de la version Angular, NgModules déclarant/exportant directement le composant. Le statut reste inconnu si les métadonnées ne permettent pas de conclure.
 - **Catalogue** : chaque `@Component`, son sélecteur, ses inputs/outputs (décorateurs et API signal), s'il est exporté par un `index.ts`/`public-api.ts`, combien de fois et où il est utilisé.
 - **Concepts en doublon** : `ProfileCardComponent`, `StatTile`, `OrderPanel` et `UiCard` sont regroupés sous *card* (synonymes : card/tile/panel/box, modal/dialog/popup, …).
@@ -30,11 +38,22 @@ Hors dépôt Git ou sans Git disponible, applique les exclusions intégrées et 
 
 Une erreur Git dans un dépôt existant (configuration invalide, accès refusé, etc.) arrête l'analyse. Elle ne déclenche pas un scan qui contournerait les exclusions Git.
 
-## Réutiliser
+## Retrouver et réutiliser
 
-Le JSON contient l'inventaire complet.
+```bash
+npx @angularkit/inventory . --search "carte" --limit 3
+npx @angularkit/inventory . --search "profile card" --json candidates.json --md candidates.md
+```
 
-Chaque composant expose `standalone` (`true`, `false` ou `null`), `ngModules`, `inputDetails`, `imports`, `examples`, `routeReferences` et `usageStatus`. `stats.unused` garde son sens historique (aucun usage dans les templates) ; `stats.unconfirmed` compte les composants sans référence ni dans les templates ni dans les routes.
+Chaque résultat indique pourquoi il correspond, comment l’importer si un export est confirmé, les entrées requises déclarées et jusqu’à trois exemples de balises existantes. Un nom ou sélecteur exact est favorisé, et les composants dont le nom couvre tous les termes passent en premier. Dans ce cas, les candidats trouvés seulement grâce au texte d'un template (une page qui *mentionne* « product card ») sont écartés ; ceux trouvés via leur description ou leurs entrées restent proposés. Les synonymes se limitent au vocabulaire UI générique (card/tile/carte, dialog/modal, table/tableau…) : une liste n’est pas un tableau, une icône n’est pas un avatar. La recherche reste lexicale.
+
+Un résultat vide signifie qu'aucune correspondance n'a été détectée, pas qu'aucun composant adapté n'existe : reformule avec un terme présent dans le projet ou consulte le catalogue.
+
+Le vocabulaire bilingue couvre aussi des concepts d'interface comme `consentement` / `consent`, `déconnexion` / `logout` et `historique` / `history`. Les termes métier sont recherchés dans les noms, descriptions et textes du projet ; ils ne sont pas traduits automatiquement par un dictionnaire propre aux projets de test.
+
+Sans `--search`, le JSON contient l'inventaire complet. Avec `--search`, il contient `query` et `results` (`component`, `score`, `reasons`) ; le score est un classement lexical, pas une probabilité.
+
+Chaque composant expose `description`, `templateText`, `standalone` (`true`, `false` ou `null`), `ngModules`, `inputDetails`, `imports`, `examples`, `routeReferences` et `usageStatus`. `stats.unused` garde son sens historique (aucun usage dans les templates) ; `stats.unconfirmed` compte les composants sans référence ni dans les templates ni dans les routes.
 
 ## Limites connues
 
@@ -44,6 +63,7 @@ Chaque composant expose `standalone` (`true`, `false` ou `null`), `ngModules`, `
 - Les entrées requises prises en charge sont celles déclarées directement avec `@Input`, `input.required` ou `model.required`. Les entrées héritées, les alias des fonctions Angular importées et les métadonnées dynamiques ne sont pas résolus.
 - Les routes prises en charge sont les objets avec `path` ou `matcher`, une propriété `component` référant à une classe locale/importée, ou `loadComponent: () => import(...).then(m => m.Classe)` (et un import direct pour un export par défaut). Les fonctions nommées et alias `const` dans le même fichier sont suivis, avec protection contre les cycles et les paramètres qui masquent un nom. Les fonctions importées, appels arbitraires et bindings mutables ne sont pas résolus. Les autres formes et créations dynamiques restent non confirmées.
 - Le défaut standalone est déduit de la version Angular installée ou d’une version majeure explicite dans package.json (standalone par défaut depuis Angular 19). Les tableaux littéraux `declarations`/`exports` des NgModules sont analysés ; les réexports transitifs de modules et les métadonnées calculées ne sont pas suivis. Un import TypeScript valide ne garantit pas une intégration Angular valide.
+- Les descriptions et textes enrichissent la recherche, mais les synonymes sont limités. Les expressions Angular, traductions calculées et textes chargés à l’exécution ne sont pas évalués. Une correspondance lexicale n’est pas une garantie fonctionnelle.
 - Un extrait de balise montre le code existant ; ce n’est pas un exemple autonome avec toutes ses variables et dépendances.
 - Un composant `templateUrl` pointant hors du projet n'est pas résolu.
 - Outil fourni « as is ».
@@ -52,9 +72,13 @@ Chaque composant expose `standalone` (`true`, `false` ou `null`), `ngModules`, `
 
 Génère `COMPONENTS.md` (compact : une ligne par composant, avec l'instruction d'import complète, y compris les exports renommés ou par défaut) et référence-le depuis ton `CLAUDE.md` / `AGENTS.md` :
 
-> Avant de créer un composant UI, lis `COMPONENTS.md` et réutilise l'existant.
+> Avant de créer un composant UI, consulte `COMPONENTS.md` ou lance `npx @angularkit/inventory . --search "<besoin>"`. Examine les candidats, leurs imports, leurs entrées requises et leurs usages existants, puis dis si tu réutilises, adaptes, ou si rien ne convient.
 
 `--details` ajoute une fiche complète par composant : pratique pour un petit projet, mais le fichier grossit vite (≈ 20 lignes par composant).
+
+## Évaluer l'utilité
+
+Les [critères d'évaluation](https://github.com/AngularKit/inventory/blob/main/docs/EVALUATION.md) distinguent une réponse directe, une piste utile et un résultat hors sujet. Ils séparent aussi la pertinence de recherche, la validité de l'intégration et le temps réellement gagné pendant une tâche.
 
 ## Développement
 

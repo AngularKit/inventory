@@ -1,7 +1,8 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import ts from 'typescript';
-import { matchesSelector, templateTags, type TemplateTag } from './templates.js';
+import { search } from './search.js';
+import { matchesSelector, templateTags, templateSearchText, type TemplateTag } from './templates.js';
 import { collectFiles, type ScanScope } from './files.js';
 import { enrichReuse, type ImportSuggestion, type SourceReference, type UsageExample } from './reuse.js';
 
@@ -16,6 +17,8 @@ export interface InputInfo {
 
 export interface ComponentInfo {
   className: string;
+  description: string;
+  templateText: string;
   standalone: boolean | null; // null when Angular version or metadata cannot be resolved
   ngModules: { name: string; file: string; exported: boolean }[];
   selectors: string[];
@@ -128,6 +131,20 @@ function signalInput(member: ts.PropertyDeclaration, call: ts.CallExpression): I
   return { name, binding: alias || name, required, type: call.typeArguments?.[0]?.getText() };
 }
 
+function jsDocDescription(node: ts.Node): string {
+  return ts.getJSDocCommentsAndTags(node).filter(ts.isJSDoc)
+    .map((doc) => typeof doc.comment === 'string' ? doc.comment : doc.comment?.map((part) => part.text).join('') ?? '')
+    .join(' ');
+}
+
+/** Static accessibility labels declared on the host element. */
+function hostLabels(meta: ts.ObjectLiteralExpression | undefined): string {
+  const host = meta && propertyNamed(meta, 'host');
+  if (!host || !ts.isObjectLiteralExpression(host.initializer)) return '';
+  const labels = host.initializer;
+  return ['aria-label', 'title', 'alt'].map((key) => stringProp(labels, key) ?? '').join(' ').trim();
+}
+
 /** null when metadata is computed or the flag is not a boolean literal. */
 function standaloneOf(meta: ts.ObjectLiteralExpression | undefined, defaultStandalone: boolean | null): boolean | null {
   if (!meta || meta.properties.some(ts.isSpreadAssignment)) return null;
@@ -174,6 +191,8 @@ function extractComponents(sourceFile: ts.SourceFile, root: string, defaultStand
         }
         result.push({
           className: node.name.text,
+          description: jsDocDescription(node),
+          templateText: hostLabels(meta),
           standalone: standaloneOf(meta, defaultStandalone),
           ngModules: [],
           selectors: selector ? selector.split(',').map((s) => s.trim()).filter(Boolean) : [],
@@ -350,6 +369,7 @@ export function scan(rootInput: string): Inventory {
   const parsedTemplates = new Map([...templates].map(([file, text]) => [file, templateTags(text)]));
   for (const c of components) {
     const own = new Set([c.templateFile, c.file + '#' + c.className].filter(Boolean));
+    c.templateText = [c.templateText, ...[...own].map((file) => templateSearchText(templates.get(file!) ?? ''))].join(' ').trim();
     for (const [tplFile, tags] of parsedTemplates) {
       if (own.has(tplFile)) continue;
       const matches = tags.filter((tag) => c.selectors.some((selector) => matchesSelector(tag, selector)));
@@ -454,14 +474,15 @@ export function toMarkdown(inv: Inventory, options: MarkdownOptions = {}): strin
     L.push('## Réutiliser un composant', '');
     for (const c of inv.components) L.push(...componentDetails(c));
   } else {
-    L.push('Fiches de réutilisation (imports, entrées requises, exemples) : `--details`.', '');
+    L.push('Fiches de réutilisation (imports, entrées requises, exemples) : `--search <termes>` ou `--details`.', '');
   }
   return L.join('\n');
 }
 
-/** Reuse sheet of one component (import, integration, required inputs, examples). */
+/** Reuse details shared by the full catalogue and search results. */
 export function componentDetails(c: ComponentInfo): string[] {
   const lines = [`### ${c.className}`, '', `Source : \`${c.file}\``, ''];
+  if (c.description) lines.push(c.description, '');
   lines.push(c.standalone === true ? 'Intégration : composant standalone, à ajouter aux imports du composant appelant.'
     : c.standalone === false ? 'Intégration : composant non standalone ; utiliser un NgModule qui le déclare ou l’exporte.'
     : 'Intégration standalone/NgModule non déterminée : vérifier les métadonnées et la version Angular.', '');
@@ -477,4 +498,18 @@ export function componentDetails(c: ComponentInfo): string[] {
   for (const route of c.routeReferences) lines.push(`Référence dans une route : \`${route.file}:${route.line}\`.`, '');
   if (!c.examples.length && !c.routeReferences.length) lines.push('Aucun exemple d’usage confirmé.', '');
   return lines;
+}
+
+export interface SearchResult { component: ComponentInfo; score: number; reasons: string[] }
+
+/** Deterministic lexical search, with evidence rather than a semantic-confidence claim. */
+export function searchComponents(inv: Inventory, query: string, limit = 5): SearchResult[] {
+  return search(inv, query, limit);
+}
+
+export function searchToMarkdown(results: SearchResult[], query: string): string {
+  const lines = [`# Recherche de composants : ${query}`, '', 'Correspondances lexicales expliquées : noms, entrées/sorties, descriptions et textes des templates. Les chemins se recherchent avec une barre oblique. Chaque terme significatif doit correspondre.', ''];
+  if (!results.length) lines.push('Aucun candidat trouvé. Essayer un nom, un sélecteur ou un terme plus court.');
+  for (const result of results) lines.push(...componentDetails(result.component), `Pourquoi : ${result.reasons.join(' ; ')}.`, '');
+  return lines.join('\n');
 }
