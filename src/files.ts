@@ -24,12 +24,16 @@ export interface ScanScope {
 function gitListing(root: string): string[] | undefined {
   try {
     const listing = execFileSync('git', ['-C', root, 'ls-files', '-z', '--cached', '--others', '--exclude-standard'], {
-      encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 256 * 1024 * 1024,
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 256 * 1024 * 1024,
+      // Keep the one recoverable diagnostic stable across the user's Git locale.
+      env: { ...process.env, LC_ALL: 'C' },
     });
     return [...new Set(listing.split('\0').filter(Boolean))];
   } catch (error) {
-    const { code, status } = error as { code?: string; status?: number };
-    if (code === 'ENOENT' || status === 128) return undefined;
+    const { code, status, stderr } = error as { code?: string; status?: number; stderr?: string | Buffer };
+    const diagnostic = stderr?.toString() ?? '';
+    const outsideRepository = /^fatal: not a git repository \(or (?:any of the parent directories|any parent up to mount point [^\r\n]+)\)(?:: \.git)?\r?$/m.test(diagnostic);
+    if (code === 'ENOENT' || (status === 128 && outsideRepository)) return undefined;
     throw new Error(`Échec de git ls-files : ${error instanceof Error ? error.message : String(error)}`);
   }
 }

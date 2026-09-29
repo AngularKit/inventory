@@ -28,6 +28,8 @@ Ignore notamment `node_modules`, `dist`, `.nx`, `.angular`, `coverage`, `.stryke
 
 Hors dépôt Git ou sans Git disponible, applique les exclusions intégrées et signale que les règles `.gitignore` ne sont pas appliquées.
 
+Une erreur Git dans un dépôt existant (configuration invalide, accès refusé, etc.) arrête l'analyse. Elle ne déclenche pas un scan qui contournerait les exclusions Git.
+
 ## Réutiliser
 
 Le JSON contient l'inventaire complet.
